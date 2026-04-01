@@ -1,5 +1,5 @@
 # ============================================================
-#  trackwasher.py  —  AI Fingerprint Remover & Mastering for audio files
+#  trackwasher.py  —  Pre-mastering & audio enhancement for AI-generated music
 #
 #  INSTALL:
 #    pip install numpy scipy soundfile streamlit pyloudnorm matplotlib pydub
@@ -13,16 +13,16 @@
 #    streamlit run trackwasher.py
 #
 #  PROCESSING CHAIN (12 stages):
-#    ── Anti-Fingerprint ──
-#    1.  Phase decorrelation    : breaks L/R symmetry left by neural vocoders
-#    2.  Stereo widening        : enhances mid/side separation for natural feel
-#    3.  HF artifact smoothing  : targets repetitive spectral patterns >12kHz
+#    ── Audio Enhancement ──
+#    1.  Phase decorrelation    : enriches stereo depth by adding natural L/R variation
+#    2.  Stereo widening        : enhances mid/side separation for a spacious mix
+#    3.  HF smoothing           : refines high-frequency clarity above 12kHz
 #    4.  Harmonic enrichment    : adds subtle even harmonics for analog warmth
-#    5.  Micro-timing jitter    : breaks perfect grid placement of AI generators
-#    6.  Spectral noise shaping : masks unnaturally clean AI noise floor
-#    ── Mastering ──
+#    5.  Micro-timing humanizer : introduces natural micro-timing feel
+#    6.  Ambience shaping       : adds organic room character to the noise floor
+#    ── Pre-Mastering ──
 #    7.  Multiband compressor   : tightens dynamics per frequency band
-#    8.  Tape saturation        : emulates analog tape nonlinearity
+#    8.  Tape saturation        : emulates analog tape warmth and character
 #    9.  Glue compressor        : gentle bus compression for mix cohesion
 #    10. Mid/Side EQ            : surgical spatial frequency shaping
 #    11. Soft clipper            : transparent loudness maximizer
@@ -101,11 +101,11 @@ def load_audio(path: str) -> tuple[np.ndarray, int]:
 
 
 # ────────────────────────────────────────────────────────────
-#  ANTI-FINGERPRINT PROCESSING
+#  AUDIO ENHANCEMENT
 # ────────────────────────────────────────────────────────────
 
 def phase_decorrelation(audio: np.ndarray, sample_rate: int, intensity: float = 0.6) -> np.ndarray:
-    """Break L/R symmetry left by neural vocoders via all-pass phase shifts."""
+    """Enrich stereo depth by adding natural L/R phase variation."""
     if audio.ndim < 2 or audio.shape[1] < 2:
         return audio
 
@@ -125,7 +125,7 @@ def phase_decorrelation(audio: np.ndarray, sample_rate: int, intensity: float = 
 
 
 def stereo_widening(audio: np.ndarray, width: float = 1.3) -> np.ndarray:
-    """Amplify the Side signal to widen perceived stereo image (Mid/Side)."""
+    """Widen perceived stereo image for a spacious, immersive mix (Mid/Side)."""
     if audio.ndim < 2 or audio.shape[1] < 2:
         return audio
 
@@ -147,7 +147,7 @@ def stereo_widening(audio: np.ndarray, width: float = 1.3) -> np.ndarray:
 
 
 def hf_artifact_smoothing(audio: np.ndarray, sample_rate: int, intensity: float = 0.5) -> np.ndarray:
-    """Smooth repetitive spectral comb patterns >12kHz left by mel-spectrogram inversion."""
+    """Refine high-frequency clarity by smoothing harsh spectral artifacts above 12kHz."""
     cutoff_hz = 12000
     nyq = sample_rate / 2.0
 
@@ -183,7 +183,7 @@ def hf_artifact_smoothing(audio: np.ndarray, sample_rate: int, intensity: float 
 
 
 def harmonic_enrichment(audio: np.ndarray, intensity: float = 0.25) -> np.ndarray:
-    """Add subtle even harmonics via soft-clip saturation (analog warmth)."""
+    """Add subtle even harmonics for analog warmth and musical richness."""
     saturated = np.tanh(audio * (1.0 + intensity * 2.0)) / (1.0 + intensity * 0.5)
     blend = intensity * 0.3
     result = audio * (1.0 - blend) + saturated * blend
@@ -195,7 +195,7 @@ def harmonic_enrichment(audio: np.ndarray, intensity: float = 0.25) -> np.ndarra
 
 
 def micro_timing_jitter(audio: np.ndarray, sample_rate: int, intensity: float = 0.3) -> np.ndarray:
-    """Apply sub-ms random timing shifts around transients to break AI grid perfection."""
+    """Add natural micro-timing feel around transients for a more human, groovy performance."""
     if intensity <= 0:
         return audio
 
@@ -248,7 +248,7 @@ def micro_timing_jitter(audio: np.ndarray, sample_rate: int, intensity: float = 
 
 
 def spectral_noise_shaping(audio: np.ndarray, sample_rate: int, intensity: float = 0.2) -> np.ndarray:
-    """Inject low-level pink noise to mask the unnaturally clean AI noise floor."""
+    """Add organic room ambience and character to the noise floor for a more natural sound."""
     if intensity <= 0:
         return audio
 
@@ -282,7 +282,7 @@ def spectral_noise_shaping(audio: np.ndarray, sample_rate: int, intensity: float
 
 
 # ────────────────────────────────────────────────────────────
-#  MASTERING PROCESSING
+#  PRE-MASTERING
 # ────────────────────────────────────────────────────────────
 
 def _compress_signal(x: np.ndarray, threshold_db: float, ratio: float,
@@ -631,14 +631,14 @@ def wash_track(
     audio_before = audio.copy() if return_before_after else None
 
     steps = [
-        # Anti-fingerprint
-        ("Phase decorrelation",  lambda a: phase_decorrelation(a, sr, intensity=phase_intensity)),
-        ("Stereo widening",      lambda a: stereo_widening(a, width=stereo_width)),
-        ("HF artifact smoothing", lambda a: hf_artifact_smoothing(a, sr, intensity=hf_intensity)),
+        # Audio enhancement
+        ("Stereo depth",         lambda a: phase_decorrelation(a, sr, intensity=phase_intensity)),
+        ("Stereo width",         lambda a: stereo_widening(a, width=stereo_width)),
+        ("HF refinement",       lambda a: hf_artifact_smoothing(a, sr, intensity=hf_intensity)),
         ("Harmonic enrichment",  lambda a: harmonic_enrichment(a, intensity=harmonic_intensity)),
-        ("Micro-timing jitter",  lambda a: micro_timing_jitter(a, sr, intensity=jitter_intensity)),
-        ("Spectral noise shaping", lambda a: spectral_noise_shaping(a, sr, intensity=noise_intensity)),
-        # Mastering
+        ("Timing humanizer",     lambda a: micro_timing_jitter(a, sr, intensity=jitter_intensity)),
+        ("Ambience shaping",     lambda a: spectral_noise_shaping(a, sr, intensity=noise_intensity)),
+        # Pre-mastering
         ("Multiband compressor", lambda a: multiband_compressor(a, sr, intensity=multiband_intensity)),
         ("Tape saturation",      lambda a: tape_saturation(a, intensity=tape_intensity)),
         ("Glue compressor",      lambda a: glue_compressor(a, sr, intensity=glue_intensity)),
@@ -749,7 +749,7 @@ def launch_streamlit():
     """, unsafe_allow_html=True)
 
     st.markdown('<p class="main-title">TrackWasher</p>', unsafe_allow_html=True)
-    st.markdown('<p class="subtitle">Remove AI fingerprints & master your audio tracks</p>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Pre-mastering & audio enhancement for AI-generated music</p>', unsafe_allow_html=True)
 
     col_left, col_right = st.columns([1, 1], gap="large")
 
@@ -773,36 +773,36 @@ def launch_streamlit():
             "Generator preset",
             list(PRESETS.keys()),
             index=0,
-            help="Select a preset tuned for a specific AI generator, or use Custom.",
+            help="Optimized settings for music from specific AI platforms, or use Custom.",
         )
         preset_vals = PRESETS[preset_name] if PRESETS[preset_name] else DEFAULTS
 
         st.markdown("---")
         st.subheader("Parameters")
 
-        # ── Anti-Fingerprint section ──
-        st.markdown('<p class="section-label">Anti-Fingerprint</p>', unsafe_allow_html=True)
+        # ── Audio Enhancement section ──
+        st.markdown('<p class="section-label">Audio Enhancement</p>', unsafe_allow_html=True)
 
-        phase_i = st.slider("Phase Decorrelation", 0.0, 1.0, preset_vals["phase"], 0.05,
-                            help="Breaks L/R symmetry. Higher = more separation.")
-        stereo_w = st.slider("Stereo Widening", 1.0, 2.0, preset_vals["stereo"], 0.05,
-                             help="Widens stereo image. Above 1.6 may cause mono issues.")
-        hf_i = st.slider("HF Artifact Smoothing", 0.0, 1.0, preset_vals["hf"], 0.05,
-                          help="Smooths repetitive patterns >12kHz.")
+        phase_i = st.slider("Stereo Depth", 0.0, 1.0, preset_vals["phase"], 0.05,
+                            help="Enriches stereo depth with natural L/R variation.")
+        stereo_w = st.slider("Stereo Width", 1.0, 2.0, preset_vals["stereo"], 0.05,
+                             help="Widens the stereo image. Above 1.6 may affect mono compatibility.")
+        hf_i = st.slider("HF Refinement", 0.0, 1.0, preset_vals["hf"], 0.05,
+                          help="Smooths and refines high-frequency clarity above 12kHz.")
         harmonic_i = st.slider("Harmonic Enrichment", 0.0, 1.0, preset_vals["harmonic"], 0.05,
-                               help="Adds analog warmth via soft saturation.")
-        jitter_i = st.slider("Micro-Timing Jitter", 0.0, 1.0, preset_vals["jitter"], 0.05,
-                             help="Breaks perfect AI grid timing around transients.")
-        noise_i = st.slider("Spectral Noise Shaping", 0.0, 1.0, preset_vals["noise"], 0.05,
-                            help="Adds subtle pink noise to mask clean AI noise floor.")
+                               help="Adds warm analog-style harmonics for musical richness.")
+        jitter_i = st.slider("Timing Humanizer", 0.0, 1.0, preset_vals["jitter"], 0.05,
+                             help="Adds natural micro-timing feel for a more human groove.")
+        noise_i = st.slider("Ambience Shaping", 0.0, 1.0, preset_vals["noise"], 0.05,
+                            help="Adds organic room character and natural ambience.")
 
-        # ── Mastering section ──
-        st.markdown('<p class="section-label">Mastering</p>', unsafe_allow_html=True)
+        # ── Pre-Mastering section ──
+        st.markdown('<p class="section-label">Pre-Mastering</p>', unsafe_allow_html=True)
 
         multiband_i = st.slider("Multiband Compressor", 0.0, 1.0, preset_vals["multiband"], 0.05,
                                 help="3-band compression: tightens dynamics per frequency range.")
         tape_i = st.slider("Tape Saturation", 0.0, 1.0, preset_vals["tape"], 0.05,
-                           help="Analog tape emulation: asymmetric saturation + HF rolloff.")
+                           help="Analog tape warmth and character.")
         glue_i = st.slider("Glue Compressor", 0.0, 1.0, preset_vals["glue"], 0.05,
                            help="Gentle bus compression for mix cohesion.")
         mseq_i = st.slider("Mid/Side EQ", 0.0, 1.0, preset_vals["mseq"], 0.05,
@@ -873,17 +873,17 @@ def launch_streamlit():
         st.subheader("Processing Chain")
 
         steps_info = [
-            ("Anti-Fingerprint", [
-                ("1. Phase Decorrelation", "Breaks L/R symmetry left by neural vocoders."),
-                ("2. Stereo Widening", "Mid/Side expansion for a more organic stereo image."),
-                ("3. HF Artifact Smoothing", "Targets spectral combs >12kHz (HiFi-GAN/WaveNet)."),
-                ("4. Harmonic Enrichment", "Soft saturation adds analog warmth."),
-                ("5. Micro-Timing Jitter", "Breaks perfect grid timing around transients."),
-                ("6. Spectral Noise Shaping", "Pink noise masks the clean AI noise floor."),
+            ("Audio Enhancement", [
+                ("1. Stereo Depth", "Enriches stereo field with natural L/R variation."),
+                ("2. Stereo Width", "Mid/Side expansion for a spacious, immersive mix."),
+                ("3. HF Refinement", "Smooths and refines high-frequency clarity."),
+                ("4. Harmonic Enrichment", "Adds warm analog-style harmonics."),
+                ("5. Timing Humanizer", "Introduces natural micro-timing feel."),
+                ("6. Ambience Shaping", "Adds organic room character and depth."),
             ]),
-            ("Mastering", [
+            ("Pre-Mastering", [
                 ("7. Multiband Compressor", "3-band dynamics control (low/mid/high)."),
-                ("8. Tape Saturation", "Analog tape emulation with asymmetric saturation."),
+                ("8. Tape Saturation", "Analog tape warmth and character."),
                 ("9. Glue Compressor", "Bus compression for mix cohesion."),
                 ("10. Mid/Side EQ", "Bass tightening + air boost + presence."),
                 ("11. Soft Clipper", "Transparent loudness maximization."),
@@ -914,7 +914,7 @@ def _is_streamlit():
 if _is_streamlit():
     launch_streamlit()
 elif __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="TrackWasher — Remove AI fingerprints & master audio files")
+    parser = argparse.ArgumentParser(description="TrackWasher — Pre-mastering & audio enhancement for AI-generated music")
     parser.add_argument("input", nargs="?", help="Input audio file (WAV, FLAC, MP3, OGG)")
     parser.add_argument("output", nargs="?", help="Output WAV file")
     parser.add_argument("--phase", type=float, default=None, help="Phase decorrelation (0-1)")

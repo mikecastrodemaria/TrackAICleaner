@@ -7,8 +7,6 @@
 
 ## Installation
 
-Clone the repo and run the install script for your platform:
-
 ```bash
 git clone https://github.com/mikecastrodemaria/TrackAICleaner.git
 cd TrackAICleaner
@@ -27,10 +25,10 @@ The install scripts create a `.venv` virtual environment and install all Python 
 After install, run the start script. It opens `http://localhost:8501` in your browser.
 
 1. Upload a WAV, FLAC, MP3, or OGG file
-2. Select a preset or adjust sliders manually
+2. Select a platform preset or adjust sliders manually
 3. Click **Wash Track**
 4. Listen to the result, view the spectrogram comparison
-5. Download the washed WAV file
+5. Download the enhanced WAV file
 
 ## Running via CLI
 
@@ -38,7 +36,7 @@ After install, run the start script. It opens `http://localhost:8501` in your br
 # Basic usage
 python trackwasher.py input.wav output.wav
 
-# With a preset
+# With a platform preset
 python trackwasher.py input.wav output.wav --preset suno
 
 # Custom parameters

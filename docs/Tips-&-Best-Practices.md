@@ -4,46 +4,52 @@
 
 1. **Start with a preset, then adjust.** Don't try to dial in all 12 parameters from scratch. Pick the closest preset and tweak from there.
 
-2. **Less is more.** The default values are designed to be transparent. If you can hear the processing, you've probably gone too far (unless that's what you want).
+2. **Less is more.** The default values are designed to be transparent. If you can hear the processing as "processing" rather than "improvement," you've probably gone too far.
 
-3. **Always A/B compare.** Use the spectrogram comparison in the Streamlit UI to verify changes are working. Listen critically on good headphones.
+3. **Always A/B compare.** Use the spectrogram comparison in the Streamlit UI to verify changes. Listen critically on good headphones.
 
-## Anti-Fingerprint Priority
+## Enhancement Priority
 
-If you care most about removing AI detection signatures, prioritize these stages:
+For the best sonic improvement, prioritize:
 
-1. **HF Artifact Smoothing** (most impactful for spectral analysis tools)
-2. **Micro-Timing Jitter** (most impactful for rhythm analysis tools)
-3. **Phase Decorrelation** (most impactful for L/R correlation analysis)
-4. **Spectral Noise Shaping** (masks noise floor analysis)
+1. **HF Refinement** — biggest impact on overall polish and clarity
+2. **Stereo Width** — immediately makes the mix feel more spacious
+3. **Timing Humanizer** — adds natural groove and feel
+4. **Harmonic Enrichment** — brings analog warmth
 
-## Mastering Priority
+## Pre-Mastering Priority
 
-If you care most about release-ready sound quality:
+For release-ready loudness and dynamics:
 
-1. **LUFS Normalization** (essential for streaming platforms)
-2. **Multiband Compressor** (tightens the overall sound)
-3. **Glue Compressor** (makes the mix cohesive)
-4. **Mid/Side EQ** (professional spatial balance)
+1. **LUFS Normalization** — essential for streaming platforms
+2. **Multiband Compressor** — tightens the overall balance
+3. **Glue Compressor** — makes the mix cohesive
+4. **Mid/Side EQ** — professional spatial balance
 
 ## Common Scenarios
 
-### "I want maximum anti-fingerprint effect"
+### "I want the best possible quality for Spotify/YouTube release"
 
 ```bash
-python trackwasher.py input.wav output.wav --phase 0.8 --stereo 1.5 --hf 0.8 --harmonic 0.3 --jitter 0.5 --noise 0.4 --multiband 0.4 --tape 0.3 --lufs -14
+python trackwasher.py input.wav output.wav --preset suno --lufs -14
 ```
 
-### "I want clean mastering without changing the sound too much"
+### "I want a warm, analog-sounding master"
 
 ```bash
-python trackwasher.py input.wav output.wav --preset light --multiband 0.3 --glue 0.3 --mseq 0.2 --lufs -14
+python trackwasher.py input.wav output.wav --preset generic --tape 0.5 --harmonic 0.4 --glue 0.4
 ```
 
-### "I want the loudest possible master"
+### "I want maximum loudness for club/radio"
 
 ```bash
 python trackwasher.py input.wav output.wav --preset generic --multiband 0.6 --glue 0.5 --clip 0.4 --lufs -9
+```
+
+### "I want subtle polish without changing the character"
+
+```bash
+python trackwasher.py input.wav output.wav --preset light
 ```
 
 ### "I want to keep the original dynamics"
@@ -59,12 +65,12 @@ Always check your output in mono if it will be played on:
 - Some Bluetooth speakers
 - PA systems in mono configuration
 
-If stereo widening is above 1.5, test mono playback carefully. The Mid/Side EQ's bass tightening (side HP at 200Hz) helps maintain mono compatibility.
+If stereo width is above 1.5, test mono playback. The Mid/Side EQ stage helps maintain mono compatibility by tightening bass in the center.
 
 ## Sample Rate
 
-TrackWasher works at the input file's native sample rate. No resampling is performed. For best quality, start with the highest quality source available (WAV or FLAC, 44.1kHz or higher).
+TrackWasher works at the input file's native sample rate. No resampling is performed. For best quality, use the highest quality source available (WAV or FLAC, 44.1kHz or higher).
 
 ## Output Format
 
-Output is always 16-bit PCM WAV. This is the universal standard for distribution. If you need 24-bit or 32-bit float output, you can modify the `subtype` parameter in the `sf.write()` call in the source code.
+Output is always 16-bit PCM WAV — the universal standard for digital distribution. If you need 24-bit or 32-bit float output, you can modify the `subtype` parameter in the `sf.write()` call in the source code.
