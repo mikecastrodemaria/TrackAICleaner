@@ -2,3 +2,6 @@ numpy
 scipy
 soundfile
 streamlit
+pyloudnorm
+matplotlib
+pydub
