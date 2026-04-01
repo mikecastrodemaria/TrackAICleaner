@@ -1,5 +1,5 @@
 # ============================================================
-#  trackwasher.py  —  AI Fingerprint Remover for audio files
+#  trackwasher.py  —  AI Fingerprint Remover & Mastering for audio files
 #
 #  INSTALL:
 #    pip install numpy scipy soundfile streamlit pyloudnorm matplotlib pydub
@@ -7,19 +7,26 @@
 #  CLI USAGE:
 #    python trackwasher.py input.wav output.wav
 #    python trackwasher.py input.wav output.wav --preset suno
-#    python trackwasher.py input.wav output.wav --phase 0.8 --stereo 1.4 --hf 0.6 --harmonic 0.3 --jitter 0.4 --noise 0.3 --lufs -14
+#    python trackwasher.py input.wav output.wav --phase 0.8 --stereo 1.4 --hf 0.6
 #
 #  STREAMLIT UI:
 #    streamlit run trackwasher.py
 #
-#  PROCESSING CHAIN:
-#    1. Phase decorrelation   : breaks L/R symmetry left by neural vocoders
-#    2. Stereo widening       : enhances mid/side separation for natural feel
-#    3. HF artifact smoothing : targets repetitive spectral patterns >12kHz
-#    4. Harmonic enrichment   : adds subtle even harmonics for analog warmth
-#    5. Micro-timing jitter   : breaks perfect grid placement of AI generators
-#    6. Spectral noise shaping: masks unnaturally clean AI noise floor
-#    7. LUFS normalization    : normalizes loudness to broadcast/streaming standard
+#  PROCESSING CHAIN (12 stages):
+#    ── Anti-Fingerprint ──
+#    1.  Phase decorrelation    : breaks L/R symmetry left by neural vocoders
+#    2.  Stereo widening        : enhances mid/side separation for natural feel
+#    3.  HF artifact smoothing  : targets repetitive spectral patterns >12kHz
+#    4.  Harmonic enrichment    : adds subtle even harmonics for analog warmth
+#    5.  Micro-timing jitter    : breaks perfect grid placement of AI generators
+#    6.  Spectral noise shaping : masks unnaturally clean AI noise floor
+#    ── Mastering ──
+#    7.  Multiband compressor   : tightens dynamics per frequency band
+#    8.  Tape saturation        : emulates analog tape nonlinearity
+#    9.  Glue compressor        : gentle bus compression for mix cohesion
+#    10. Mid/Side EQ            : surgical spatial frequency shaping
+#    11. Soft clipper            : transparent loudness maximizer
+#    12. LUFS normalization     : loudness normalization + true peak limiting
 # ============================================================
 
 import numpy as np
@@ -39,25 +46,35 @@ PRESETS = {
     "Custom": None,
     "Suno": {
         "phase": 0.7, "stereo": 1.4, "hf": 0.7, "harmonic": 0.3,
-        "jitter": 0.4, "noise": 0.3, "lufs": -14.0,
+        "jitter": 0.4, "noise": 0.3,
+        "multiband": 0.5, "tape": 0.4, "glue": 0.4, "mseq": 0.4, "clip": 0.3,
+        "lufs": -14.0,
     },
     "Udio": {
         "phase": 0.6, "stereo": 1.3, "hf": 0.8, "harmonic": 0.2,
-        "jitter": 0.3, "noise": 0.25, "lufs": -14.0,
+        "jitter": 0.3, "noise": 0.25,
+        "multiband": 0.4, "tape": 0.35, "glue": 0.35, "mseq": 0.3, "clip": 0.25,
+        "lufs": -14.0,
     },
     "Generic AI": {
         "phase": 0.6, "stereo": 1.3, "hf": 0.5, "harmonic": 0.25,
-        "jitter": 0.3, "noise": 0.2, "lufs": -14.0,
+        "jitter": 0.3, "noise": 0.2,
+        "multiband": 0.3, "tape": 0.25, "glue": 0.3, "mseq": 0.25, "clip": 0.2,
+        "lufs": -14.0,
     },
     "Light Touch": {
         "phase": 0.3, "stereo": 1.1, "hf": 0.3, "harmonic": 0.1,
-        "jitter": 0.2, "noise": 0.1, "lufs": -14.0,
+        "jitter": 0.2, "noise": 0.1,
+        "multiband": 0.15, "tape": 0.1, "glue": 0.15, "mseq": 0.1, "clip": 0.1,
+        "lufs": -14.0,
     },
 }
 
 DEFAULTS = {
     "phase": 0.6, "stereo": 1.3, "hf": 0.5, "harmonic": 0.25,
-    "jitter": 0.3, "noise": 0.2, "lufs": -14.0,
+    "jitter": 0.3, "noise": 0.2,
+    "multiband": 0.3, "tape": 0.25, "glue": 0.3, "mseq": 0.25, "clip": 0.2,
+    "lufs": -14.0,
 }
 
 
@@ -79,13 +96,12 @@ def load_audio(path: str) -> tuple[np.ndarray, int]:
             samples = samples.reshape(-1, 2)
         return samples, sr
 
-    # soundfile handles WAV, FLAC, OGG
     audio, sr = sf.read(path, dtype='float32')
     return audio, sr
 
 
 # ────────────────────────────────────────────────────────────
-#  PROCESSING FUNCTIONS
+#  ANTI-FINGERPRINT PROCESSING
 # ────────────────────────────────────────────────────────────
 
 def phase_decorrelation(audio: np.ndarray, sample_rate: int, intensity: float = 0.6) -> np.ndarray:
@@ -185,14 +201,12 @@ def micro_timing_jitter(audio: np.ndarray, sample_rate: int, intensity: float = 
 
     result = audio.copy()
 
-    # Work on mono mix for transient detection
     if audio.ndim > 1:
         mono = np.mean(audio, axis=1)
     else:
         mono = audio.copy()
 
-    # Compute energy envelope
-    frame_size = int(sample_rate * 0.01)  # 10ms frames
+    frame_size = int(sample_rate * 0.01)
     hop = frame_size // 2
     energy = np.array([
         np.sum(mono[i:i + frame_size] ** 2)
@@ -202,11 +216,9 @@ def micro_timing_jitter(audio: np.ndarray, sample_rate: int, intensity: float = 
     if len(energy) < 3:
         return audio
 
-    # Find transient peaks
     threshold = np.mean(energy) + np.std(energy) * 1.5
     peaks, _ = signal.find_peaks(energy, height=threshold, distance=int(0.05 * sample_rate / hop))
 
-    # Max jitter: ±0.5ms scaled by intensity
     max_shift_samples = int(sample_rate * 0.0005 * intensity)
     if max_shift_samples < 1:
         return audio
@@ -217,7 +229,6 @@ def micro_timing_jitter(audio: np.ndarray, sample_rate: int, intensity: float = 
         sample_pos = peak_idx * hop
         shift = rng.integers(-max_shift_samples, max_shift_samples + 1)
 
-        # Define a small region around the transient to shift
         region_start = max(0, sample_pos - frame_size)
         region_end = min(len(result), sample_pos + frame_size)
         region_len = region_end - region_start
@@ -225,7 +236,6 @@ def micro_timing_jitter(audio: np.ndarray, sample_rate: int, intensity: float = 
         if region_len < abs(shift) * 2:
             continue
 
-        # Circular shift the region for each channel
         if audio.ndim > 1:
             for ch in range(audio.shape[1]):
                 region = result[region_start:region_end, ch].copy()
@@ -246,26 +256,19 @@ def spectral_noise_shaping(audio: np.ndarray, sample_rate: int, intensity: float
     n_channels = audio.shape[1] if audio.ndim > 1 else 1
 
     rng = np.random.default_rng(123)
-
     result = audio.copy()
 
     for ch in range(n_channels):
-        # Generate pink noise via Voss-McCartney algorithm (simplified)
         white = rng.standard_normal(n_samples).astype(np.float32)
 
-        # Shape white noise to pink (1/f) via IIR filter
-        # Paul Kellet's filter coefficients for pink noise
         b_pink = np.array([0.049922035, -0.095993537, 0.050612699, -0.004709510])
         a_pink = np.array([1.0, -2.494956002, 2.017265875, -0.522189400])
         pink = signal.lfilter(b_pink, a_pink, white)
 
-        # Normalize pink noise
         pink_peak = np.max(np.abs(pink))
         if pink_peak > 0:
             pink = pink / pink_peak
 
-        # Scale: intensity 1.0 = -60 dB, intensity 0.0 = silence
-        # Range: -80 dB (very subtle) to -50 dB (noticeable)
         noise_db = -80.0 + intensity * 30.0
         noise_level = 10.0 ** (noise_db / 20.0)
         pink_scaled = pink * noise_level
@@ -278,37 +281,273 @@ def spectral_noise_shaping(audio: np.ndarray, sample_rate: int, intensity: float
     return result
 
 
+# ────────────────────────────────────────────────────────────
+#  MASTERING PROCESSING
+# ────────────────────────────────────────────────────────────
+
+def _compress_signal(x: np.ndarray, threshold_db: float, ratio: float,
+                     attack_ms: float, release_ms: float, sample_rate: int) -> np.ndarray:
+    """Apply dynamic range compression to a 1D signal."""
+    threshold = 10.0 ** (threshold_db / 20.0)
+    attack_coeff = np.exp(-1.0 / (sample_rate * attack_ms / 1000.0))
+    release_coeff = np.exp(-1.0 / (sample_rate * release_ms / 1000.0))
+
+    envelope = np.zeros_like(x)
+    env = 0.0
+    for i in range(len(x)):
+        level = abs(x[i])
+        if level > env:
+            env = attack_coeff * env + (1.0 - attack_coeff) * level
+        else:
+            env = release_coeff * env + (1.0 - release_coeff) * level
+        envelope[i] = env
+
+    gain = np.ones_like(x)
+    mask = envelope > threshold
+    if np.any(mask):
+        over_db = 20.0 * np.log10(np.clip(envelope[mask] / threshold, 1e-10, None))
+        gain_reduction_db = over_db * (1.0 - 1.0 / ratio)
+        gain[mask] = 10.0 ** (-gain_reduction_db / 20.0)
+
+    return x * gain
+
+
+def multiband_compressor(audio: np.ndarray, sample_rate: int, intensity: float = 0.3) -> np.ndarray:
+    """3-band compressor: independent compression for low, mid, and high frequencies."""
+    if intensity <= 0:
+        return audio
+
+    nyq = sample_rate / 2.0
+    low_cut = min(250.0 / nyq, 0.95)
+    high_cut = min(4000.0 / nyq, 0.95)
+
+    if low_cut >= high_cut:
+        return audio
+
+    b_lo, a_lo = signal.butter(4, low_cut, btype='low')
+    b_mid, a_mid = signal.butter(4, [low_cut, high_cut], btype='band')
+    b_hi, a_hi = signal.butter(4, high_cut, btype='high')
+
+    # Compression settings per band, scaled by intensity
+    threshold_base = -20.0 + (1.0 - intensity) * 10.0  # -20 to -10 dB
+    ratio = 2.0 + intensity * 2.0  # 2:1 to 4:1
+
+    result = audio.copy()
+    n_channels = result.shape[1] if audio.ndim > 1 else 1
+
+    for ch in range(n_channels):
+        chan = result[:, ch] if audio.ndim > 1 else result
+
+        low = signal.lfilter(b_lo, a_lo, chan)
+        mid = signal.lfilter(b_mid, a_mid, chan)
+        high = signal.lfilter(b_hi, a_hi, chan)
+
+        # Different attack/release per band
+        low_c = _compress_signal(low, threshold_base - 2, ratio, 30.0, 200.0, sample_rate)
+        mid_c = _compress_signal(mid, threshold_base, ratio * 0.8, 15.0, 150.0, sample_rate)
+        high_c = _compress_signal(high, threshold_base + 2, ratio * 0.6, 5.0, 80.0, sample_rate)
+
+        out = low_c + mid_c + high_c
+
+        if audio.ndim > 1:
+            result[:, ch] = out
+        else:
+            result = out
+
+    peak = np.max(np.abs(result))
+    if peak > 0.99:
+        result = result / peak * 0.99
+    return result
+
+
+def tape_saturation(audio: np.ndarray, intensity: float = 0.25) -> np.ndarray:
+    """Emulate analog tape: asymmetric soft saturation + subtle HF rolloff + compression."""
+    if intensity <= 0:
+        return audio
+
+    drive = 1.0 + intensity * 3.0
+
+    # Asymmetric saturation (tape characteristic: positive peaks clip differently)
+    driven = audio * drive
+    pos = np.tanh(driven * 1.0)
+    neg = np.tanh(driven * 0.85)  # slight asymmetry
+    saturated = np.where(driven >= 0, pos, neg)
+    saturated = saturated / drive  # compensate gain
+
+    # Blend dry/wet
+    blend = intensity * 0.5
+    result = audio * (1.0 - blend) + saturated * blend
+
+    # Subtle HF rolloff (tape naturally rolls off highs)
+    nyq = 48000.0 / 2.0  # approximate
+    rolloff_freq = min(0.9, 15000.0 / nyq)
+    if rolloff_freq < 0.95:
+        b_roll, a_roll = signal.butter(1, rolloff_freq, btype='low')
+        rolloff_blend = intensity * 0.2
+        if audio.ndim > 1:
+            for ch in range(audio.shape[1]):
+                filtered = signal.lfilter(b_roll, a_roll, result[:, ch])
+                result[:, ch] = result[:, ch] * (1.0 - rolloff_blend) + filtered * rolloff_blend
+        else:
+            filtered = signal.lfilter(b_roll, a_roll, result)
+            result = result * (1.0 - rolloff_blend) + filtered * rolloff_blend
+
+    peak = np.max(np.abs(result))
+    if peak > 0.99:
+        result = result / peak * 0.99
+    return result
+
+
+def glue_compressor(audio: np.ndarray, sample_rate: int, intensity: float = 0.3) -> np.ndarray:
+    """Gentle stereo bus compression for mix cohesion (VCA-style glue)."""
+    if intensity <= 0:
+        return audio
+
+    threshold_db = -18.0 + (1.0 - intensity) * 10.0  # -18 to -8 dB
+    ratio = 1.5 + intensity * 1.5  # 1.5:1 to 3:1
+    attack_ms = 30.0 - intensity * 20.0  # 30ms to 10ms
+    release_ms = 250.0 - intensity * 100.0  # 250ms to 150ms
+
+    result = audio.copy()
+
+    if audio.ndim > 1:
+        # Linked stereo compression: use max envelope across channels
+        mono_env = np.max(np.abs(audio), axis=1)
+        gain = np.ones_like(mono_env)
+
+        threshold = 10.0 ** (threshold_db / 20.0)
+        attack_coeff = np.exp(-1.0 / (sample_rate * attack_ms / 1000.0))
+        release_coeff = np.exp(-1.0 / (sample_rate * release_ms / 1000.0))
+
+        env = 0.0
+        envelope = np.zeros_like(mono_env)
+        for i in range(len(mono_env)):
+            level = mono_env[i]
+            if level > env:
+                env = attack_coeff * env + (1.0 - attack_coeff) * level
+            else:
+                env = release_coeff * env + (1.0 - release_coeff) * level
+            envelope[i] = env
+
+        mask = envelope > threshold
+        if np.any(mask):
+            over_db = 20.0 * np.log10(np.clip(envelope[mask] / threshold, 1e-10, None))
+            gain_reduction_db = over_db * (1.0 - 1.0 / ratio)
+            gain[mask] = 10.0 ** (-gain_reduction_db / 20.0)
+
+        for ch in range(audio.shape[1]):
+            result[:, ch] = audio[:, ch] * gain
+    else:
+        result = _compress_signal(audio, threshold_db, ratio, attack_ms, release_ms, sample_rate)
+
+    peak = np.max(np.abs(result))
+    if peak > 0.99:
+        result = result / peak * 0.99
+    return result
+
+
+def midside_eq(audio: np.ndarray, sample_rate: int, intensity: float = 0.25) -> np.ndarray:
+    """Mid/Side EQ: tighten bass in center, add air on sides."""
+    if intensity <= 0 or audio.ndim < 2 or audio.shape[1] < 2:
+        return audio
+
+    left = audio[:, 0]
+    right = audio[:, 1]
+    mid = (left + right) * 0.5
+    side = (left - right) * 0.5
+
+    nyq = sample_rate / 2.0
+
+    # Mid: high-pass bass tightening at ~80Hz
+    hp_freq = min(80.0 / nyq, 0.4)
+    b_hp, a_hp = signal.butter(2, hp_freq, btype='high')
+    mid_filtered = signal.lfilter(b_hp, a_hp, mid)
+    mid = mid * (1.0 - intensity * 0.3) + mid_filtered * (intensity * 0.3)
+
+    # Mid: slight presence boost 2-5kHz via peaking filter
+    presence_freq = min(3500.0 / nyq, 0.9)
+    if presence_freq < 0.95:
+        b_pres, a_pres = signal.butter(2, [min(2000.0 / nyq, 0.9), min(5000.0 / nyq, 0.95)], btype='band')
+        presence = signal.lfilter(b_pres, a_pres, mid)
+        mid = mid + presence * intensity * 0.15
+
+    # Side: air boost >10kHz
+    air_freq = min(10000.0 / nyq, 0.95)
+    if air_freq < 0.95:
+        b_air, a_air = signal.butter(2, air_freq, btype='high')
+        air = signal.lfilter(b_air, a_air, side)
+        side = side + air * intensity * 0.3
+
+    # Side: reduce bass below 200Hz (mono compatibility)
+    side_hp_freq = min(200.0 / nyq, 0.4)
+    b_shp, a_shp = signal.butter(2, side_hp_freq, btype='high')
+    side_filtered = signal.lfilter(b_shp, a_shp, side)
+    side = side * (1.0 - intensity * 0.5) + side_filtered * (intensity * 0.5)
+
+    result = audio.copy()
+    result[:, 0] = mid + side
+    result[:, 1] = mid - side
+
+    peak = np.max(np.abs(result))
+    if peak > 0.99:
+        result = result / peak * 0.99
+    return result
+
+
+def soft_clipper(audio: np.ndarray, intensity: float = 0.2) -> np.ndarray:
+    """Transparent soft clipping for final loudness maximization (+1-2 dB)."""
+    if intensity <= 0:
+        return audio
+
+    # Drive into the clipper
+    drive = 1.0 + intensity * 1.5  # 1.0 to 2.5
+    driven = audio * drive
+
+    # Soft clip using a cubic waveshaper (more transparent than tanh)
+    threshold = 0.85
+    result = np.where(
+        np.abs(driven) <= threshold,
+        driven,
+        np.sign(driven) * (threshold + (1.0 - threshold) * np.tanh(
+            (np.abs(driven) - threshold) / (1.0 - threshold)
+        ))
+    )
+
+    # Compensate gain
+    result = result / drive
+
+    # Blend
+    blend = intensity * 0.6
+    result = audio * (1.0 - blend) + result * blend
+
+    peak = np.max(np.abs(result))
+    if peak > 0.99:
+        result = result / peak * 0.99
+    return result
+
+
 def lufs_normalize(audio: np.ndarray, sample_rate: int, target_lufs: float = -14.0) -> np.ndarray:
     """Normalize to target LUFS with true peak limiting at -1 dBTP."""
     import pyloudnorm as pyln
 
     meter = pyln.Meter(sample_rate)
-
-    # Measure current loudness
     current_lufs = meter.integrated_loudness(audio)
 
     if np.isinf(current_lufs) or np.isnan(current_lufs):
         return audio
 
-    # Apply gain to reach target
     gain_db = target_lufs - current_lufs
     gain_linear = 10.0 ** (gain_db / 20.0)
     result = audio * gain_linear
 
-    # True peak limiter at -1 dBTP
     true_peak_limit = 10.0 ** (-1.0 / 20.0)  # ~0.891
     peak = np.max(np.abs(result))
     if peak > true_peak_limit:
-        # Soft limiting via tanh compression on peaks above threshold
-        mask = np.abs(result) > true_peak_limit * 0.9
-        if np.any(mask):
-            # Compress the signal above threshold
-            ratio = true_peak_limit / peak
-            result = np.where(
-                np.abs(result) > true_peak_limit * 0.9,
-                np.sign(result) * true_peak_limit * np.tanh(np.abs(result) / true_peak_limit),
-                result,
-            )
+        result = np.where(
+            np.abs(result) > true_peak_limit * 0.9,
+            np.sign(result) * true_peak_limit * np.tanh(np.abs(result) / true_peak_limit),
+            result,
+        )
 
     return result
 
@@ -321,10 +560,8 @@ def make_spectrogram_figure(audio_before: np.ndarray, audio_after: np.ndarray, s
     """Create a side-by-side spectrogram comparison figure."""
     import matplotlib.pyplot as plt
     import matplotlib
-
     matplotlib.use("Agg")
 
-    # Use mono for display
     if audio_before.ndim > 1:
         mono_before = np.mean(audio_before, axis=1)
     else:
@@ -363,6 +600,11 @@ def wash_track(
     harmonic_intensity: float = 0.25,
     jitter_intensity: float = 0.3,
     noise_intensity: float = 0.2,
+    multiband_intensity: float = 0.3,
+    tape_intensity: float = 0.25,
+    glue_intensity: float = 0.3,
+    mseq_intensity: float = 0.25,
+    clip_intensity: float = 0.2,
     target_lufs: float = -14.0,
     verbose: bool = True,
     progress_callback=None,
@@ -377,7 +619,6 @@ def wash_track(
 
     audio, sr = load_audio(input_path)
 
-    # Force stereo
     if audio.ndim == 1:
         audio = np.stack([audio, audio], axis=1)
         if verbose:
@@ -390,18 +631,25 @@ def wash_track(
     audio_before = audio.copy() if return_before_after else None
 
     steps = [
-        ("Phase decorrelation", lambda a: phase_decorrelation(a, sr, intensity=phase_intensity)),
-        ("Stereo widening", lambda a: stereo_widening(a, width=stereo_width)),
+        # Anti-fingerprint
+        ("Phase decorrelation",  lambda a: phase_decorrelation(a, sr, intensity=phase_intensity)),
+        ("Stereo widening",      lambda a: stereo_widening(a, width=stereo_width)),
         ("HF artifact smoothing", lambda a: hf_artifact_smoothing(a, sr, intensity=hf_intensity)),
-        ("Harmonic enrichment", lambda a: harmonic_enrichment(a, intensity=harmonic_intensity)),
-        ("Micro-timing jitter", lambda a: micro_timing_jitter(a, sr, intensity=jitter_intensity)),
+        ("Harmonic enrichment",  lambda a: harmonic_enrichment(a, intensity=harmonic_intensity)),
+        ("Micro-timing jitter",  lambda a: micro_timing_jitter(a, sr, intensity=jitter_intensity)),
         ("Spectral noise shaping", lambda a: spectral_noise_shaping(a, sr, intensity=noise_intensity)),
-        ("LUFS normalization", lambda a: lufs_normalize(a, sr, target_lufs=target_lufs)),
+        # Mastering
+        ("Multiband compressor", lambda a: multiband_compressor(a, sr, intensity=multiband_intensity)),
+        ("Tape saturation",      lambda a: tape_saturation(a, intensity=tape_intensity)),
+        ("Glue compressor",      lambda a: glue_compressor(a, sr, intensity=glue_intensity)),
+        ("Mid/Side EQ",          lambda a: midside_eq(a, sr, intensity=mseq_intensity)),
+        ("Soft clipper",         lambda a: soft_clipper(a, intensity=clip_intensity)),
+        ("LUFS normalization",   lambda a: lufs_normalize(a, sr, target_lufs=target_lufs)),
     ]
 
     for i, (name, fn) in enumerate(steps):
         if verbose:
-            print(f"  [{i+1}/{len(steps)}] {name} ...")
+            print(f"  [{i+1:2d}/{len(steps)}] {name} ...")
         audio = fn(audio)
         if progress_callback:
             progress_callback((i + 1) / len(steps), name)
@@ -425,6 +673,11 @@ def wash_track_bytes(
     harmonic_intensity: float = 0.25,
     jitter_intensity: float = 0.3,
     noise_intensity: float = 0.2,
+    multiband_intensity: float = 0.3,
+    tape_intensity: float = 0.25,
+    glue_intensity: float = 0.3,
+    mseq_intensity: float = 0.25,
+    clip_intensity: float = 0.2,
     target_lufs: float = -14.0,
     progress_callback=None,
 ) -> tuple[bytes, int, float, np.ndarray, np.ndarray]:
@@ -446,6 +699,11 @@ def wash_track_bytes(
             harmonic_intensity=harmonic_intensity,
             jitter_intensity=jitter_intensity,
             noise_intensity=noise_intensity,
+            multiband_intensity=multiband_intensity,
+            tape_intensity=tape_intensity,
+            glue_intensity=glue_intensity,
+            mseq_intensity=mseq_intensity,
+            clip_intensity=clip_intensity,
             target_lufs=target_lufs,
             verbose=False,
             progress_callback=progress_callback,
@@ -485,15 +743,16 @@ def launch_streamlit():
                   margin-bottom: 0.5rem; border-left: 4px solid #e94560; }
     .step-card h4 { margin: 0 0 0.3rem 0; color: #e94560; }
     .step-card p  { margin: 0; color: #ccc; font-size: 0.9rem; }
+    .section-label { font-size: 0.85rem; color: #e94560; font-weight: 600;
+                     text-transform: uppercase; letter-spacing: 0.05em; margin: 0.8rem 0 0.3rem 0; }
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown('<p class="main-title">TrackWasher</p>', unsafe_allow_html=True)
-    st.markdown('<p class="subtitle">Remove AI fingerprints from your audio tracks</p>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Remove AI fingerprints & master your audio tracks</p>', unsafe_allow_html=True)
 
     col_left, col_right = st.columns([1, 1], gap="large")
 
-    # ── Left column: upload + controls ──
     with col_left:
         st.subheader("Upload")
         uploaded = st.file_uploader(
@@ -509,52 +768,52 @@ def launch_streamlit():
 
         st.markdown("---")
 
-        # ── Preset selector ──
         st.subheader("Preset")
         preset_name = st.selectbox(
             "Generator preset",
             list(PRESETS.keys()),
             index=0,
-            help="Select a preset tuned for a specific AI generator, or use Custom for manual control.",
+            help="Select a preset tuned for a specific AI generator, or use Custom.",
         )
-
         preset_vals = PRESETS[preset_name] if PRESETS[preset_name] else DEFAULTS
 
         st.markdown("---")
         st.subheader("Parameters")
 
-        phase_i = st.slider(
-            "Phase Decorrelation", 0.0, 1.0, preset_vals["phase"], 0.05,
-            help="Breaks L/R symmetry. Higher = more separation.",
-        )
-        stereo_w = st.slider(
-            "Stereo Widening", 1.0, 2.0, preset_vals["stereo"], 0.05,
-            help="Widens stereo image. Above 1.6 may cause mono issues.",
-        )
-        hf_i = st.slider(
-            "HF Artifact Smoothing", 0.0, 1.0, preset_vals["hf"], 0.05,
-            help="Smooths repetitive patterns >12kHz.",
-        )
-        harmonic_i = st.slider(
-            "Harmonic Enrichment", 0.0, 1.0, preset_vals["harmonic"], 0.05,
-            help="Adds analog warmth via soft saturation.",
-        )
-        jitter_i = st.slider(
-            "Micro-Timing Jitter", 0.0, 1.0, preset_vals["jitter"], 0.05,
-            help="Breaks perfect AI grid timing around transients.",
-        )
-        noise_i = st.slider(
-            "Spectral Noise Shaping", 0.0, 1.0, preset_vals["noise"], 0.05,
-            help="Adds subtle pink noise to mask clean AI noise floor.",
-        )
-        lufs_target = st.slider(
-            "Target LUFS", -24.0, -8.0, preset_vals["lufs"], 0.5,
-            help="Loudness normalization target. -14 = Spotify/YouTube standard.",
-        )
+        # ── Anti-Fingerprint section ──
+        st.markdown('<p class="section-label">Anti-Fingerprint</p>', unsafe_allow_html=True)
+
+        phase_i = st.slider("Phase Decorrelation", 0.0, 1.0, preset_vals["phase"], 0.05,
+                            help="Breaks L/R symmetry. Higher = more separation.")
+        stereo_w = st.slider("Stereo Widening", 1.0, 2.0, preset_vals["stereo"], 0.05,
+                             help="Widens stereo image. Above 1.6 may cause mono issues.")
+        hf_i = st.slider("HF Artifact Smoothing", 0.0, 1.0, preset_vals["hf"], 0.05,
+                          help="Smooths repetitive patterns >12kHz.")
+        harmonic_i = st.slider("Harmonic Enrichment", 0.0, 1.0, preset_vals["harmonic"], 0.05,
+                               help="Adds analog warmth via soft saturation.")
+        jitter_i = st.slider("Micro-Timing Jitter", 0.0, 1.0, preset_vals["jitter"], 0.05,
+                             help="Breaks perfect AI grid timing around transients.")
+        noise_i = st.slider("Spectral Noise Shaping", 0.0, 1.0, preset_vals["noise"], 0.05,
+                            help="Adds subtle pink noise to mask clean AI noise floor.")
+
+        # ── Mastering section ──
+        st.markdown('<p class="section-label">Mastering</p>', unsafe_allow_html=True)
+
+        multiband_i = st.slider("Multiband Compressor", 0.0, 1.0, preset_vals["multiband"], 0.05,
+                                help="3-band compression: tightens dynamics per frequency range.")
+        tape_i = st.slider("Tape Saturation", 0.0, 1.0, preset_vals["tape"], 0.05,
+                           help="Analog tape emulation: asymmetric saturation + HF rolloff.")
+        glue_i = st.slider("Glue Compressor", 0.0, 1.0, preset_vals["glue"], 0.05,
+                           help="Gentle bus compression for mix cohesion.")
+        mseq_i = st.slider("Mid/Side EQ", 0.0, 1.0, preset_vals["mseq"], 0.05,
+                           help="Tighten bass center, add air on sides, presence boost.")
+        clip_i = st.slider("Soft Clipper", 0.0, 1.0, preset_vals["clip"], 0.05,
+                           help="Transparent clipping for extra loudness headroom.")
+        lufs_target = st.slider("Target LUFS", -24.0, -8.0, preset_vals["lufs"], 0.5,
+                                help="-14 = Spotify/YouTube. -11 = louder. -16 = more dynamic.")
 
         process_btn = st.button("Wash Track", type="primary", use_container_width=True, disabled=not uploaded)
 
-    # ── Right column: output ──
     with col_right:
         st.subheader("Output")
 
@@ -575,6 +834,11 @@ def launch_streamlit():
                     harmonic_intensity=harmonic_i,
                     jitter_intensity=jitter_i,
                     noise_intensity=noise_i,
+                    multiband_intensity=multiband_i,
+                    tape_intensity=tape_i,
+                    glue_intensity=glue_i,
+                    mseq_intensity=mseq_i,
+                    clip_intensity=clip_i,
                     target_lufs=lufs_target,
                     progress_callback=on_progress,
                 )
@@ -593,7 +857,6 @@ def launch_streamlit():
                 )
                 st.success("Track washed successfully.")
 
-                # ── Spectrogram comparison ──
                 st.markdown("---")
                 st.subheader("Spectrogram Comparison")
                 fig = make_spectrogram_figure(audio_before, audio_after, sr)
@@ -610,19 +873,30 @@ def launch_streamlit():
         st.subheader("Processing Chain")
 
         steps_info = [
-            ("1. Phase Decorrelation", "Breaks L/R symmetry left by neural vocoders."),
-            ("2. Stereo Widening", "Mid/Side expansion for a more organic stereo image."),
-            ("3. HF Artifact Smoothing", "Targets spectral combs >12kHz (HiFi-GAN/WaveNet)."),
-            ("4. Harmonic Enrichment", "Soft saturation adds analog warmth."),
-            ("5. Micro-Timing Jitter", "Breaks perfect grid timing around transients."),
-            ("6. Spectral Noise Shaping", "Pink noise masks the clean AI noise floor."),
-            ("7. LUFS Normalization", "Loudness normalization + true peak limiting."),
+            ("Anti-Fingerprint", [
+                ("1. Phase Decorrelation", "Breaks L/R symmetry left by neural vocoders."),
+                ("2. Stereo Widening", "Mid/Side expansion for a more organic stereo image."),
+                ("3. HF Artifact Smoothing", "Targets spectral combs >12kHz (HiFi-GAN/WaveNet)."),
+                ("4. Harmonic Enrichment", "Soft saturation adds analog warmth."),
+                ("5. Micro-Timing Jitter", "Breaks perfect grid timing around transients."),
+                ("6. Spectral Noise Shaping", "Pink noise masks the clean AI noise floor."),
+            ]),
+            ("Mastering", [
+                ("7. Multiband Compressor", "3-band dynamics control (low/mid/high)."),
+                ("8. Tape Saturation", "Analog tape emulation with asymmetric saturation."),
+                ("9. Glue Compressor", "Bus compression for mix cohesion."),
+                ("10. Mid/Side EQ", "Bass tightening + air boost + presence."),
+                ("11. Soft Clipper", "Transparent loudness maximization."),
+                ("12. LUFS Normalization", "Loudness normalization + true peak limiting."),
+            ]),
         ]
-        for title, desc in steps_info:
-            st.markdown(
-                f'<div class="step-card"><h4>{title}</h4><p>{desc}</p></div>',
-                unsafe_allow_html=True,
-            )
+        for section, items in steps_info:
+            st.markdown(f'<p class="section-label">{section}</p>', unsafe_allow_html=True)
+            for title, desc in items:
+                st.markdown(
+                    f'<div class="step-card"><h4>{title}</h4><p>{desc}</p></div>',
+                    unsafe_allow_html=True,
+                )
 
 
 # ────────────────────────────────────────────────────────────
@@ -640,37 +914,38 @@ def _is_streamlit():
 if _is_streamlit():
     launch_streamlit()
 elif __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="TrackWasher — Remove AI fingerprints from audio files")
+    parser = argparse.ArgumentParser(description="TrackWasher — Remove AI fingerprints & master audio files")
     parser.add_argument("input", nargs="?", help="Input audio file (WAV, FLAC, MP3, OGG)")
     parser.add_argument("output", nargs="?", help="Output WAV file")
-    parser.add_argument("--phase", type=float, default=None, help="Phase decorrelation intensity (0-1)")
-    parser.add_argument("--stereo", type=float, default=None, help="Stereo widening factor (1.0-2.0)")
-    parser.add_argument("--hf", type=float, default=None, help="HF smoothing intensity (0-1)")
-    parser.add_argument("--harmonic", type=float, default=None, help="Harmonic enrichment intensity (0-1)")
-    parser.add_argument("--jitter", type=float, default=None, help="Micro-timing jitter intensity (0-1)")
-    parser.add_argument("--noise", type=float, default=None, help="Spectral noise shaping intensity (0-1)")
-    parser.add_argument("--lufs", type=float, default=None, help="Target LUFS level (e.g. -14)")
+    parser.add_argument("--phase", type=float, default=None, help="Phase decorrelation (0-1)")
+    parser.add_argument("--stereo", type=float, default=None, help="Stereo widening (1.0-2.0)")
+    parser.add_argument("--hf", type=float, default=None, help="HF smoothing (0-1)")
+    parser.add_argument("--harmonic", type=float, default=None, help="Harmonic enrichment (0-1)")
+    parser.add_argument("--jitter", type=float, default=None, help="Micro-timing jitter (0-1)")
+    parser.add_argument("--noise", type=float, default=None, help="Spectral noise shaping (0-1)")
+    parser.add_argument("--multiband", type=float, default=None, help="Multiband compressor (0-1)")
+    parser.add_argument("--tape", type=float, default=None, help="Tape saturation (0-1)")
+    parser.add_argument("--glue", type=float, default=None, help="Glue compressor (0-1)")
+    parser.add_argument("--mseq", type=float, default=None, help="Mid/Side EQ (0-1)")
+    parser.add_argument("--clip", type=float, default=None, help="Soft clipper (0-1)")
+    parser.add_argument("--lufs", type=float, default=None, help="Target LUFS (e.g. -14)")
     parser.add_argument("--preset", type=str, default=None, choices=["suno", "udio", "generic", "light"],
                         help="Apply a generator preset")
 
     args = parser.parse_args()
 
     if args.input and args.output:
-        # Resolve preset + overrides
         if args.preset:
             preset_map = {"suno": "Suno", "udio": "Udio", "generic": "Generic AI", "light": "Light Touch"}
             vals = PRESETS[preset_map[args.preset]].copy()
         else:
             vals = DEFAULTS.copy()
 
-        # CLI overrides take priority
-        if args.phase is not None:    vals["phase"] = args.phase
-        if args.stereo is not None:   vals["stereo"] = args.stereo
-        if args.hf is not None:       vals["hf"] = args.hf
-        if args.harmonic is not None: vals["harmonic"] = args.harmonic
-        if args.jitter is not None:   vals["jitter"] = args.jitter
-        if args.noise is not None:    vals["noise"] = args.noise
-        if args.lufs is not None:     vals["lufs"] = args.lufs
+        for key in ["phase", "stereo", "hf", "harmonic", "jitter", "noise",
+                     "multiband", "tape", "glue", "mseq", "clip", "lufs"]:
+            cli_val = getattr(args, key, None)
+            if cli_val is not None:
+                vals[key] = cli_val
 
         wash_track(
             input_path=args.input,
@@ -681,6 +956,11 @@ elif __name__ == "__main__":
             harmonic_intensity=vals["harmonic"],
             jitter_intensity=vals["jitter"],
             noise_intensity=vals["noise"],
+            multiband_intensity=vals["multiband"],
+            tape_intensity=vals["tape"],
+            glue_intensity=vals["glue"],
+            mseq_intensity=vals["mseq"],
+            clip_intensity=vals["clip"],
             target_lufs=vals["lufs"],
         )
     else:
