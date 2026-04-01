@@ -39,7 +39,20 @@ All stages have adjustable intensity (0.0 to 1.0). Defaults are tuned for transp
 
 ## Quick Start
 
-### Install
+### One-Click Install with Pinokio
+
+The easiest way to install and run TrackWasher. No terminal, no Python setup — just click.
+
+1. Install [Pinokio](https://pinokio.computer/) if you don't have it
+2. Click the button below or paste the repo URL in Pinokio's "Download" tab:
+
+```
+https://github.com/mikecastrodemaria/TrackAICleaner.git
+```
+
+3. Click **Install**, then **Start** — that's it!
+
+### Manual Install
 
 > **MP3 support** requires [ffmpeg](https://ffmpeg.org/) installed on your system (`brew install ffmpeg` / `apt install ffmpeg` / `choco install ffmpeg`).
 
