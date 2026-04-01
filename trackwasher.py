@@ -918,23 +918,31 @@ def launch_streamlit():
     with col_right:
         st.subheader("Output")
 
-        # Persist results in session_state so download clicks don't reset them
-        if "washed_results" not in st.session_state:
-            st.session_state.washed_results = []
-        if "washed_zip" not in st.session_state:
-            st.session_state.washed_zip = None
-            st.session_state.washed_zip_name = None
+        # Persist results on disk (not in session_state) to avoid memory issues
+        if "washed_meta" not in st.session_state:
+            st.session_state.washed_meta = []    # list of {name, path, sr, duration}
+            st.session_state.washed_dl_path = None
+            st.session_state.washed_dl_name = None
 
         # ── Processing ──
         if process_btn and has_files:
-            import zipfile, io as _io
+            import zipfile
 
-            all_results = []
+            # Clean previous temp files
+            for m in st.session_state.washed_meta:
+                if os.path.exists(m["path"]):
+                    try: os.unlink(m["path"])
+                    except OSError: pass
+            if st.session_state.washed_dl_path and os.path.exists(st.session_state.washed_dl_path):
+                try: os.unlink(st.session_state.washed_dl_path)
+                except OSError: pass
+
+            meta_list = []
             total_files = len(uploaded_files)
             progress_bar = st.progress(0, text="Starting...")
 
             for file_idx, uf in enumerate(uploaded_files):
-                file_base = (file_idx) / total_files
+                file_base = file_idx / total_files
                 file_span = 1.0 / total_files
 
                 def on_progress(pct, step_name, _base=file_base, _span=file_span, _name=uf.name):
@@ -943,7 +951,7 @@ def launch_streamlit():
 
                 try:
                     raw_bytes = uf.getvalue()
-                    out_bytes, sr, duration, audio_before, audio_after = wash_track_bytes(
+                    out_bytes, sr, duration, _, _ = wash_track_bytes(
                         input_bytes=raw_bytes,
                         filename=uf.name,
                         phase_intensity=phase_i,
@@ -963,47 +971,51 @@ def launch_streamlit():
                     )
 
                     out_name = os.path.splitext(uf.name)[0] + "_washed.wav"
-                    all_results.append({
-                        "name": out_name, "data": out_bytes, "sr": sr,
-                        "duration": duration, "before": audio_before, "after": audio_after,
-                    })
+                    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                    tmp.write(out_bytes)
+                    tmp.close()
+                    meta_list.append({"name": out_name, "path": tmp.name, "sr": sr, "duration": duration})
 
                 except Exception as e:
                     st.error(f"Failed: {uf.name}: {e}")
 
-            progress_bar.progress(1.0, text=f"Done! {len(all_results)} track(s) washed.")
+            progress_bar.progress(1.0, text=f"Done! {len(meta_list)} track(s) washed.")
 
-            # Build ZIP (even for single file, keeps one download button)
-            zip_buf = _io.BytesIO()
-            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                for r in all_results:
-                    zf.writestr(r["name"], r["data"])
-            zip_buf.seek(0)
-
-            # Store in session_state
-            st.session_state.washed_results = all_results
-            if len(all_results) == 1:
-                st.session_state.washed_zip = all_results[0]["data"]
-                st.session_state.washed_zip_name = all_results[0]["name"]
+            # Build download file
+            if len(meta_list) == 1:
+                dl_path = meta_list[0]["path"]
+                dl_name = meta_list[0]["name"]
             else:
-                st.session_state.washed_zip = zip_buf.getvalue()
-                st.session_state.washed_zip_name = "trackwasher_batch.zip"
+                tmp_zip = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+                with zipfile.ZipFile(tmp_zip.name, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for m in meta_list:
+                        zf.write(m["path"], m["name"])
+                dl_path = tmp_zip.name
+                dl_name = "trackwasher_batch.zip"
 
-        # ── Display results from session_state ──
-        results = st.session_state.washed_results
-        if results:
-            # Single download button at the top
-            if len(results) == 1:
-                dl_label = f"Download {st.session_state.washed_zip_name}"
+            st.session_state.washed_meta = meta_list
+            st.session_state.washed_dl_path = dl_path
+            st.session_state.washed_dl_name = dl_name
+
+        # ── Display results ──
+        meta = st.session_state.washed_meta
+        dl_path = st.session_state.washed_dl_path
+        if meta and dl_path and os.path.exists(dl_path):
+            # Single download button — reads file on demand
+            with open(dl_path, "rb") as f:
+                dl_data = f.read()
+
+            if len(meta) == 1:
+                dl_label = f"Download {st.session_state.washed_dl_name}"
                 dl_mime = "audio/wav"
             else:
-                dl_label = f"Download all {len(results)} tracks (ZIP)"
+                dl_label = f"Download all {len(meta)} tracks (ZIP)"
                 dl_mime = "application/zip"
 
             st.download_button(
                 label=dl_label,
-                data=st.session_state.washed_zip,
-                file_name=st.session_state.washed_zip_name,
+                data=dl_data,
+                file_name=st.session_state.washed_dl_name,
                 mime=dl_mime,
                 use_container_width=True,
                 key="dl_main",
@@ -1011,21 +1023,16 @@ def launch_streamlit():
 
             st.markdown("---")
 
-            # Show audio players and info
-            for idx, r in enumerate(results):
-                st.markdown(f"**{r['name']}**")
-                st.audio(r["data"], format="audio/wav")
-                st.caption(f"{r['sr']} Hz  |  {r['duration']:.2f}s")
-
-                if len(results) == 1:
-                    st.markdown("---")
-                    st.subheader("Spectrogram Comparison")
-                    fig = make_spectrogram_figure(r["before"], r["after"], r["sr"])
-                    st.pyplot(fig)
-                elif idx < len(results) - 1:
+            for idx, m in enumerate(meta):
+                st.markdown(f"**{m['name']}**")
+                if os.path.exists(m["path"]):
+                    with open(m["path"], "rb") as f:
+                        st.audio(f.read(), format="audio/wav")
+                st.caption(f"{m['sr']} Hz  |  {m['duration']:.2f}s")
+                if idx < len(meta) - 1:
                     st.markdown("---")
 
-            st.success(f"{len(results)} track(s) ready.")
+            st.success(f"{len(meta)} track(s) ready.")
 
         elif not process_btn:
             st.info("Upload audio file(s) and click **Wash Track** to begin.")
