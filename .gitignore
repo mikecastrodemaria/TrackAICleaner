@@ -8,3 +8,4 @@ __pycache__/
 *.mp3
 *.flac
 .streamlit/
+user_presets.json

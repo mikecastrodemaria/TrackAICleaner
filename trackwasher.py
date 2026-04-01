@@ -1,6 +1,6 @@
 # ============================================================
 #  trackwasher.py  —  Pre-mastering & audio enhancement for AI-generated music
-#  Version 3.4
+#  Version 3.5
 #
 #  INSTALL:
 #    pip install numpy scipy soundfile streamlit pyloudnorm matplotlib pydub
@@ -77,6 +77,29 @@ DEFAULTS = {
     "multiband": 0.3, "tape": 0.25, "glue": 0.3, "mseq": 0.25, "clip": 0.2,
     "lufs": -14.0,
 }
+
+BUILTIN_PRESET_NAMES = set(PRESETS.keys())
+
+USER_PRESETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_presets.json")
+
+
+def load_user_presets() -> dict:
+    """Load user presets from JSON file."""
+    if os.path.exists(USER_PRESETS_FILE):
+        try:
+            import json
+            with open(USER_PRESETS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_user_presets(presets: dict):
+    """Save user presets to JSON file."""
+    import json
+    with open(USER_PRESETS_FILE, "w") as f:
+        json.dump(presets, f, indent=2)
 
 
 # ────────────────────────────────────────────────────────────
@@ -667,10 +690,11 @@ def wash_track(
     clip_intensity: float = 0.2,
     target_lufs: float = -14.0,
     enabled_stages: dict[str, bool] | None = None,
+    max_seconds: float | None = None,
     verbose: bool = True,
     progress_callback=None,
     return_before_after: bool = False,
-) -> str | tuple[str, np.ndarray, np.ndarray, int]:
+) -> str | tuple[str, np.ndarray, np.ndarray, int, float, float]:
 
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
@@ -685,9 +709,22 @@ def wash_track(
         if verbose:
             print("  Mono detected — duplicated to stereo")
 
+    # Trim to max_seconds for preview mode
+    if max_seconds is not None:
+        max_samples = int(sr * max_seconds)
+        if len(audio) > max_samples:
+            audio = audio[:max_samples]
+            if verbose:
+                print(f"  Preview  : trimmed to {max_seconds}s")
+
     duration = len(audio) / sr
     if verbose:
         print(f"  Duration : {duration:.2f}s  |  Sample rate: {sr} Hz  |  Channels: {audio.shape[1]}")
+
+    # Measure LUFS before processing
+    import pyloudnorm as pyln
+    meter = pyln.Meter(sr)
+    lufs_before = meter.integrated_loudness(audio)
 
     audio_before = audio.copy() if return_before_after else None
 
@@ -719,13 +756,19 @@ def wash_track(
         if progress_callback:
             progress_callback((i + 1) / len(steps), name)
 
+    # Measure LUFS after processing
+    lufs_after = meter.integrated_loudness(audio)
+
     sf.write(output_path, audio, sr, subtype='PCM_16')
 
     if verbose:
+        lufs_b = f"{lufs_before:.1f}" if not np.isinf(lufs_before) else "N/A"
+        lufs_a = f"{lufs_after:.1f}" if not np.isinf(lufs_after) else "N/A"
+        print(f"  LUFS     : {lufs_b} -> {lufs_a}")
         print(f"\n  Done -> {output_path}\n")
 
     if return_before_after:
-        return output_path, audio_before, audio, sr
+        return output_path, audio_before, audio, sr, lufs_before, lufs_after
     return output_path
 
 
@@ -745,9 +788,10 @@ def wash_track_bytes(
     clip_intensity: float = 0.2,
     target_lufs: float = -14.0,
     enabled_stages: dict[str, bool] | None = None,
+    max_seconds: float | None = None,
     progress_callback=None,
-) -> tuple[bytes, int, float, np.ndarray, np.ndarray]:
-    """Process from bytes, return (output_bytes, sample_rate, duration, audio_before, audio_after)."""
+) -> tuple[bytes, int, float, np.ndarray, np.ndarray, float, float]:
+    """Process from bytes, return (output_bytes, sr, duration, audio_before, audio_after, lufs_before, lufs_after)."""
     ext = os.path.splitext(filename)[1].lower() or ".wav"
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp_in:
         tmp_in.write(input_bytes)
@@ -772,17 +816,18 @@ def wash_track_bytes(
             clip_intensity=clip_intensity,
             target_lufs=target_lufs,
             enabled_stages=enabled_stages,
+            max_seconds=max_seconds,
             verbose=False,
             progress_callback=progress_callback,
             return_before_after=True,
         )
-        _, audio_before, audio_after, sr = result
+        _, audio_before, audio_after, sr, lufs_before, lufs_after = result
         duration = len(audio_after) / sr
 
         with open(tmp_out_path, "rb") as f:
             out_bytes = f.read()
 
-        return out_bytes, sr, duration, audio_before, audio_after
+        return out_bytes, sr, duration, audio_before, audio_after, lufs_before, lufs_after
     finally:
         for p in (tmp_in_path, tmp_out_path):
             if os.path.exists(p):
@@ -838,13 +883,37 @@ def launch_streamlit():
         st.markdown("---")
 
         st.subheader("Preset")
+
+        # Merge user presets into choices
+        user_presets = load_user_presets()
+        all_preset_names = list(PRESETS.keys())
+        for name in user_presets:
+            if name not in PRESETS:
+                all_preset_names.append(name)
+
         preset_name = st.selectbox(
             "Generator preset",
-            list(PRESETS.keys()),
+            all_preset_names,
             index=0,
             help="Optimized settings for music from specific AI platforms, or use Custom.",
         )
-        preset_vals = PRESETS[preset_name] if PRESETS[preset_name] else DEFAULTS
+
+        if preset_name in user_presets:
+            preset_vals = user_presets[preset_name]
+        elif PRESETS.get(preset_name):
+            preset_vals = PRESETS[preset_name]
+        else:
+            preset_vals = DEFAULTS
+
+        # Save / Delete preset controls (save executes after sliders are defined)
+        sc1, sc2 = st.columns([0.7, 0.3])
+        save_name = sc1.text_input("Preset name", value="", placeholder="My Preset",
+                                   label_visibility="collapsed", key="save_preset_name")
+        save_btn = sc2.button("Save Preset", use_container_width=True, key="save_preset_btn")
+
+        del_preset_btn = False
+        if preset_name in user_presets:
+            del_preset_btn = st.button("Delete this preset", key="del_preset_btn")
 
         st.markdown("---")
         st.subheader("Parameters")
@@ -922,21 +991,104 @@ def launch_streamlit():
             "mseq": en_mseq, "clip": en_clip, "lufs": en_lufs,
         }
 
+        # ── Save preset (now we have slider values) ──
+        if save_btn and save_name.strip():
+            pname = save_name.strip()
+            if pname in BUILTIN_PRESET_NAMES:
+                st.warning("Cannot overwrite built-in presets.")
+            else:
+                up = load_user_presets()
+                up[pname] = {
+                    "phase": phase_i, "stereo": stereo_w, "hf": hf_i,
+                    "harmonic": harmonic_i, "jitter": jitter_i, "noise": noise_i,
+                    "multiband": multiband_i, "tape": tape_i, "glue": glue_i,
+                    "mseq": mseq_i, "clip": clip_i, "lufs": lufs_target,
+                }
+                save_user_presets(up)
+                st.success(f"Preset '{pname}' saved!")
+                st.rerun()
+        if del_preset_btn:
+            up = load_user_presets()
+            up.pop(preset_name, None)
+            save_user_presets(up)
+            st.success(f"Preset '{preset_name}' deleted.")
+            st.rerun()
+
+        # ── Action buttons ──
         has_files = len(uploaded_files) > 0
         is_batch = len(uploaded_files) > 1
+        bc1, bc2 = st.columns(2)
+        preview_btn = bc1.button("Preview 15s", use_container_width=True, disabled=not has_files)
         btn_label = f"Wash {len(uploaded_files)} Tracks" if is_batch else "Wash Track"
-        process_btn = st.button(btn_label, type="primary", use_container_width=True, disabled=not has_files)
+        process_btn = bc2.button(btn_label, type="primary", use_container_width=True, disabled=not has_files)
+
+    # ── Shared processing kwargs ──
+    _proc_kwargs = dict(
+        phase_intensity=phase_i, stereo_width=stereo_w,
+        hf_intensity=hf_i, harmonic_intensity=harmonic_i,
+        jitter_intensity=jitter_i, noise_intensity=noise_i,
+        multiband_intensity=multiband_i, tape_intensity=tape_i,
+        glue_intensity=glue_i, mseq_intensity=mseq_i,
+        clip_intensity=clip_i, target_lufs=lufs_target,
+        enabled_stages=enabled_stages,
+    )
 
     with col_right:
         st.subheader("Output")
 
-        # Persist results on disk (not in session_state) to avoid memory issues
+        # Session state init
         if "washed_meta" not in st.session_state:
-            st.session_state.washed_meta = []    # list of {name, path, sr, duration}
+            st.session_state.washed_meta = []
             st.session_state.washed_dl_path = None
             st.session_state.washed_dl_name = None
+        if "preview_before" not in st.session_state:
+            st.session_state.preview_before = None
+            st.session_state.preview_after = None
+            st.session_state.preview_lufs = None
 
-        # ── Processing ──
+        # ── A/B Preview ──
+        if preview_btn and has_files:
+            uf = uploaded_files[0]
+            progress_bar = st.progress(0, text=f"Preview: {uf.name}...")
+
+            def on_preview_progress(pct, step_name):
+                progress_bar.progress(pct, text=f"Preview: {step_name}...")
+
+            try:
+                raw_bytes = uf.getvalue()
+                out_bytes, sr, dur, ab, aa, lb, la = wash_track_bytes(
+                    input_bytes=raw_bytes, filename=uf.name,
+                    max_seconds=15.0, progress_callback=on_preview_progress,
+                    **_proc_kwargs,
+                )
+                progress_bar.progress(1.0, text="Preview ready!")
+                st.session_state.preview_before = raw_bytes
+                st.session_state.preview_after = out_bytes
+                st.session_state.preview_lufs = (lb, la)
+            except Exception as e:
+                progress_bar.empty()
+                st.error(f"Preview failed: {e}")
+
+        if st.session_state.preview_after:
+            st.markdown('<p class="section-label">A/B Preview (15s)</p>', unsafe_allow_html=True)
+            lufs_info = st.session_state.preview_lufs
+            if lufs_info:
+                lb, la = lufs_info
+                lm1, lm2 = st.columns(2)
+                lb_str = f"{lb:.1f}" if not np.isinf(lb) else "N/A"
+                la_str = f"{la:.1f}" if not np.isinf(la) else "N/A"
+                delta = f"{la - lb:+.1f}" if not (np.isinf(lb) or np.isinf(la)) else None
+                lm1.metric("Before", f"{lb_str} LUFS")
+                lm2.metric("After", f"{la_str} LUFS", delta=delta)
+
+            pc1, pc2 = st.columns(2)
+            pc1.caption("Before")
+            pc1.audio(st.session_state.preview_before, format="audio/wav")
+            pc2.caption("After")
+            pc2.audio(st.session_state.preview_after, format="audio/wav")
+            st.markdown("---")
+
+        # ── Full processing ──
         if process_btn and has_files:
             import zipfile
 
@@ -963,30 +1115,19 @@ def launch_streamlit():
 
                 try:
                     raw_bytes = uf.getvalue()
-                    out_bytes, sr, duration, _, _ = wash_track_bytes(
-                        input_bytes=raw_bytes,
-                        filename=uf.name,
-                        phase_intensity=phase_i,
-                        stereo_width=stereo_w,
-                        hf_intensity=hf_i,
-                        harmonic_intensity=harmonic_i,
-                        jitter_intensity=jitter_i,
-                        noise_intensity=noise_i,
-                        multiband_intensity=multiband_i,
-                        tape_intensity=tape_i,
-                        glue_intensity=glue_i,
-                        mseq_intensity=mseq_i,
-                        clip_intensity=clip_i,
-                        target_lufs=lufs_target,
-                        enabled_stages=enabled_stages,
-                        progress_callback=on_progress,
+                    out_bytes, sr, duration, _, _, lb, la = wash_track_bytes(
+                        input_bytes=raw_bytes, filename=uf.name,
+                        progress_callback=on_progress, **_proc_kwargs,
                     )
 
                     out_name = os.path.splitext(uf.name)[0] + "_washed.wav"
                     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                     tmp.write(out_bytes)
                     tmp.close()
-                    meta_list.append({"name": out_name, "path": tmp.name, "sr": sr, "duration": duration})
+                    meta_list.append({
+                        "name": out_name, "path": tmp.name, "sr": sr,
+                        "duration": duration, "lufs_before": lb, "lufs_after": la,
+                    })
 
                 except Exception as e:
                     st.error(f"Failed: {uf.name}: {e}")
@@ -1013,7 +1154,6 @@ def launch_streamlit():
         meta = st.session_state.washed_meta
         dl_path = st.session_state.washed_dl_path
         if meta and dl_path and os.path.exists(dl_path):
-            # Single download button — reads file on demand
             with open(dl_path, "rb") as f:
                 dl_data = f.read()
 
@@ -1025,18 +1165,25 @@ def launch_streamlit():
                 dl_mime = "application/zip"
 
             st.download_button(
-                label=dl_label,
-                data=dl_data,
+                label=dl_label, data=dl_data,
                 file_name=st.session_state.washed_dl_name,
-                mime=dl_mime,
-                use_container_width=True,
-                key="dl_main",
+                mime=dl_mime, use_container_width=True, key="dl_main",
             )
 
             st.markdown("---")
 
             for idx, m in enumerate(meta):
                 st.markdown(f"**{m['name']}**")
+                # LUFS meter per track
+                lb = m.get("lufs_before", float("-inf"))
+                la = m.get("lufs_after", float("-inf"))
+                lm1, lm2 = st.columns(2)
+                lb_str = f"{lb:.1f}" if not np.isinf(lb) else "N/A"
+                la_str = f"{la:.1f}" if not np.isinf(la) else "N/A"
+                delta = f"{la - lb:+.1f}" if not (np.isinf(lb) or np.isinf(la)) else None
+                lm1.metric("Before", f"{lb_str} LUFS")
+                lm2.metric("After", f"{la_str} LUFS", delta=delta)
+
                 if os.path.exists(m["path"]):
                     with open(m["path"], "rb") as f:
                         st.audio(f.read(), format="audio/wav")
@@ -1046,7 +1193,7 @@ def launch_streamlit():
 
             st.success(f"{len(meta)} track(s) ready.")
 
-        elif not process_btn:
+        elif not process_btn and not preview_btn:
             st.info("Upload audio file(s) and click **Wash Track** to begin.")
 
         st.markdown("---")

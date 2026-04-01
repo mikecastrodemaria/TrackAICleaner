@@ -4,7 +4,7 @@ Pre-mastering and audio enhancement for AI-generated music.
 
 AI music platforms like Suno and Udio produce impressive results, but the raw output often needs polish before it's ready for release. TrackWasher bridges the gap between AI generation and professional-quality audio with a 12-stage processing chain — enhancing stereo depth, adding analog warmth, humanizing timing, and delivering broadcast-ready loudness.
 
-![Version](https://img.shields.io/badge/Version-3.4-purple)
+![Version](https://img.shields.io/badge/Version-3.5-purple)
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-green)
 
@@ -166,6 +166,9 @@ CLI: `--preset suno`, `--preset udio`, `--preset generic`, or `--preset light`. 
 - **Before/after spectrogram** — visual comparison of the processing effect
 - **Multi-format input** — WAV, FLAC, MP3, OGG (output is always lossless WAV)
 - **Full pre-mastering chain** — multiband compression, tape saturation, glue compressor, Mid/Side EQ, soft clipper, LUFS normalization
+- **A/B preview** — process a 15-second snippet to compare before/after instantly
+- **LUFS metering** — see measured loudness before and after processing for every track
+- **Custom presets** — save and load your own parameter presets
 - **Batch processing** — upload and process multiple tracks at once, download individually or as ZIP
 - **Streamlit web UI** — drag-and-drop interface with real-time progress
 - **CLI** — scriptable processing with full parameter control
