@@ -918,6 +918,10 @@ def launch_streamlit():
     with col_right:
         st.subheader("Output")
 
+        # Persist results in session_state so download clicks don't reset them
+        if "washed_results" not in st.session_state:
+            st.session_state.washed_results = []
+
         if process_btn and has_files:
             import zipfile, io as _io
 
@@ -956,53 +960,66 @@ def launch_streamlit():
                     progress_bar.progress(1.0, text="Done!")
 
                     out_name = os.path.splitext(uf.name)[0] + "_washed.wav"
-                    all_results.append((out_name, out_bytes, sr, duration, audio_before, audio_after))
-
-                    st.audio(out_bytes, format="audio/wav")
-                    st.caption(f"Sample rate: {sr} Hz  |  Duration: {duration:.2f}s")
-                    st.download_button(
-                        label=f"Download {out_name}",
-                        data=out_bytes,
-                        file_name=out_name,
-                        mime="audio/wav",
-                        use_container_width=True,
-                        key=f"dl_{file_idx}",
-                    )
-
-                    if not is_batch:
-                        st.markdown("---")
-                        st.subheader("Spectrogram Comparison")
-                        fig = make_spectrogram_figure(audio_before, audio_after, sr)
-                        st.pyplot(fig)
+                    all_results.append({
+                        "name": out_name, "data": out_bytes, "sr": sr,
+                        "duration": duration, "before": audio_before, "after": audio_after,
+                    })
 
                 except Exception as e:
                     progress_bar.empty()
                     st.error(f"Processing failed for {uf.name}: {e}")
 
-                if is_batch and file_idx < total_files - 1:
+            # Store results in session_state so they survive reruns
+            st.session_state.washed_results = all_results
+            if all_results:
+                st.success(f"{len(all_results)} track(s) washed successfully.")
+
+        # Display results from session_state (persists across download clicks)
+        results = st.session_state.washed_results
+        if results:
+            is_batch_result = len(results) > 1
+            for idx, r in enumerate(results):
+                if is_batch_result:
+                    st.markdown(f"**{r['name']}**")
+
+                st.audio(r["data"], format="audio/wav")
+                st.caption(f"Sample rate: {r['sr']} Hz  |  Duration: {r['duration']:.2f}s")
+                st.download_button(
+                    label=f"Download {r['name']}",
+                    data=r["data"],
+                    file_name=r["name"],
+                    mime="audio/wav",
+                    use_container_width=True,
+                    key=f"dl_{idx}",
+                )
+
+                if not is_batch_result:
+                    st.markdown("---")
+                    st.subheader("Spectrogram Comparison")
+                    fig = make_spectrogram_figure(r["before"], r["after"], r["sr"])
+                    st.pyplot(fig)
+
+                if is_batch_result and idx < len(results) - 1:
                     st.markdown("---")
 
             # Batch ZIP download
-            if is_batch and len(all_results) > 1:
+            if is_batch_result:
+                import zipfile, io as _io
                 st.markdown("---")
                 zip_buf = _io.BytesIO()
                 with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for name, data, *_ in all_results:
-                        zf.writestr(name, data)
+                    for r in results:
+                        zf.writestr(r["name"], r["data"])
                 zip_buf.seek(0)
                 st.download_button(
-                    label=f"Download all ({len(all_results)} tracks) as ZIP",
+                    label=f"Download all ({len(results)} tracks) as ZIP",
                     data=zip_buf.getvalue(),
                     file_name="trackwasher_batch.zip",
                     mime="application/zip",
                     use_container_width=True,
                     key="dl_zip",
                 )
-
-            if all_results:
-                st.success(f"{len(all_results)} track(s) washed successfully.")
-
-        else:
+        elif not process_btn:
             st.info("Upload audio file(s) and click **Wash Track** to begin.")
 
         st.markdown("---")
