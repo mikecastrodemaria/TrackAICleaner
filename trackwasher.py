@@ -1,6 +1,6 @@
 # ============================================================
 #  trackwasher.py  —  Pre-mastering & audio enhancement for AI-generated music
-#  Version 3.1
+#  Version 3.2
 #
 #  INSTALL:
 #    pip install numpy scipy soundfile streamlit pyloudnorm matplotlib pydub
@@ -633,6 +633,7 @@ def wash_track(
     mseq_intensity: float = 0.25,
     clip_intensity: float = 0.2,
     target_lufs: float = -14.0,
+    enabled_stages: dict[str, bool] | None = None,
     verbose: bool = True,
     progress_callback=None,
     return_before_after: bool = False,
@@ -658,26 +659,30 @@ def wash_track(
     audio_before = audio.copy() if return_before_after else None
 
     steps = [
+        # (key, display_name, processing_function)
         # Audio enhancement
-        ("Stereo depth",         lambda a: phase_decorrelation(a, sr, intensity=phase_intensity)),
-        ("Stereo width",         lambda a: stereo_widening(a, width=stereo_width)),
-        ("HF refinement",       lambda a: hf_artifact_smoothing(a, sr, intensity=hf_intensity)),
-        ("Harmonic enrichment",  lambda a: harmonic_enrichment(a, intensity=harmonic_intensity)),
-        ("Timing humanizer",     lambda a: micro_timing_jitter(a, sr, intensity=jitter_intensity)),
-        ("Ambience shaping",     lambda a: spectral_noise_shaping(a, sr, intensity=noise_intensity)),
+        ("phase",     "Stereo depth",         lambda a: phase_decorrelation(a, sr, intensity=phase_intensity)),
+        ("stereo",    "Stereo width",         lambda a: stereo_widening(a, width=stereo_width)),
+        ("hf",        "HF refinement",        lambda a: hf_artifact_smoothing(a, sr, intensity=hf_intensity)),
+        ("harmonic",  "Harmonic enrichment",  lambda a: harmonic_enrichment(a, intensity=harmonic_intensity)),
+        ("jitter",    "Timing humanizer",     lambda a: micro_timing_jitter(a, sr, intensity=jitter_intensity)),
+        ("noise",     "Ambience shaping",     lambda a: spectral_noise_shaping(a, sr, intensity=noise_intensity)),
         # Pre-mastering
-        ("Multiband compressor", lambda a: multiband_compressor(a, sr, intensity=multiband_intensity)),
-        ("Tape saturation",      lambda a: tape_saturation(a, intensity=tape_intensity)),
-        ("Glue compressor",      lambda a: glue_compressor(a, sr, intensity=glue_intensity)),
-        ("Mid/Side EQ",          lambda a: midside_eq(a, sr, intensity=mseq_intensity)),
-        ("Soft clipper",         lambda a: soft_clipper(a, intensity=clip_intensity)),
-        ("LUFS normalization",   lambda a: lufs_normalize(a, sr, target_lufs=target_lufs)),
+        ("multiband", "Multiband compressor", lambda a: multiband_compressor(a, sr, intensity=multiband_intensity)),
+        ("tape",      "Tape saturation",      lambda a: tape_saturation(a, intensity=tape_intensity)),
+        ("glue",      "Glue compressor",      lambda a: glue_compressor(a, sr, intensity=glue_intensity)),
+        ("mseq",      "Mid/Side EQ",          lambda a: midside_eq(a, sr, intensity=mseq_intensity)),
+        ("clip",      "Soft clipper",         lambda a: soft_clipper(a, intensity=clip_intensity)),
+        ("lufs",      "LUFS normalization",   lambda a: lufs_normalize(a, sr, target_lufs=target_lufs)),
     ]
 
-    for i, (name, fn) in enumerate(steps):
+    for i, (key, name, fn) in enumerate(steps):
+        skipped = enabled_stages is not None and not enabled_stages.get(key, True)
         if verbose:
-            print(f"  [{i+1:2d}/{len(steps)}] {name} ...")
-        audio = fn(audio)
+            tag = " [OFF]" if skipped else ""
+            print(f"  [{i+1:2d}/{len(steps)}] {name}{tag} ...")
+        if not skipped:
+            audio = fn(audio)
         if progress_callback:
             progress_callback((i + 1) / len(steps), name)
 
@@ -706,6 +711,7 @@ def wash_track_bytes(
     mseq_intensity: float = 0.25,
     clip_intensity: float = 0.2,
     target_lufs: float = -14.0,
+    enabled_stages: dict[str, bool] | None = None,
     progress_callback=None,
 ) -> tuple[bytes, int, float, np.ndarray, np.ndarray]:
     """Process from bytes, return (output_bytes, sample_rate, duration, audio_before, audio_after)."""
@@ -732,6 +738,7 @@ def wash_track_bytes(
             mseq_intensity=mseq_intensity,
             clip_intensity=clip_intensity,
             target_lufs=target_lufs,
+            enabled_stages=enabled_stages,
             verbose=False,
             progress_callback=progress_callback,
             return_before_after=True,
@@ -810,34 +817,75 @@ def launch_streamlit():
         # ── Audio Enhancement section ──
         st.markdown('<p class="section-label">Audio Enhancement</p>', unsafe_allow_html=True)
 
-        phase_i = st.slider("Stereo Depth", 0.0, 1.0, preset_vals["phase"], 0.05,
-                            help="Enriches stereo depth with natural L/R variation.")
-        stereo_w = st.slider("Stereo Width", 1.0, 2.0, preset_vals["stereo"], 0.05,
-                             help="Widens the stereo image. Above 1.6 may affect mono compatibility.")
-        hf_i = st.slider("HF Refinement", 0.0, 1.0, preset_vals["hf"], 0.05,
-                          help="Smooths and refines high-frequency clarity above 12kHz.")
-        harmonic_i = st.slider("Harmonic Enrichment", 0.0, 1.0, preset_vals["harmonic"], 0.05,
-                               help="Adds warm analog-style harmonics for musical richness.")
-        jitter_i = st.slider("Timing Humanizer", 0.0, 1.0, preset_vals["jitter"], 0.05,
-                             help="Adds natural micro-timing feel for a more human groove.")
-        noise_i = st.slider("Ambience Shaping", 0.0, 1.0, preset_vals["noise"], 0.05,
-                            help="Adds organic room character and natural ambience.")
+        c1, c2 = st.columns([0.07, 0.93])
+        en_phase = c1.checkbox("", value=True, key="en_phase", help="Enable/disable this stage")
+        phase_i = c2.slider("Stereo Depth", 0.0, 1.0, preset_vals["phase"], 0.05,
+                            help="Enriches stereo depth with natural L/R variation.", disabled=not en_phase)
+
+        c1, c2 = st.columns([0.07, 0.93])
+        en_stereo = c1.checkbox("", value=True, key="en_stereo", help="Enable/disable this stage")
+        stereo_w = c2.slider("Stereo Width", 1.0, 2.0, preset_vals["stereo"], 0.05,
+                             help="Widens the stereo image. Above 1.6 may affect mono compatibility.", disabled=not en_stereo)
+
+        c1, c2 = st.columns([0.07, 0.93])
+        en_hf = c1.checkbox("", value=True, key="en_hf", help="Enable/disable this stage")
+        hf_i = c2.slider("HF Refinement", 0.0, 1.0, preset_vals["hf"], 0.05,
+                          help="Smooths and refines high-frequency clarity above 12kHz.", disabled=not en_hf)
+
+        c1, c2 = st.columns([0.07, 0.93])
+        en_harmonic = c1.checkbox("", value=True, key="en_harmonic", help="Enable/disable this stage")
+        harmonic_i = c2.slider("Harmonic Enrichment", 0.0, 1.0, preset_vals["harmonic"], 0.05,
+                               help="Adds warm analog-style harmonics for musical richness.", disabled=not en_harmonic)
+
+        c1, c2 = st.columns([0.07, 0.93])
+        en_jitter = c1.checkbox("", value=True, key="en_jitter", help="Enable/disable this stage")
+        jitter_i = c2.slider("Timing Humanizer", 0.0, 1.0, preset_vals["jitter"], 0.05,
+                             help="Adds natural micro-timing feel for a more human groove.", disabled=not en_jitter)
+
+        c1, c2 = st.columns([0.07, 0.93])
+        en_noise = c1.checkbox("", value=True, key="en_noise", help="Enable/disable this stage")
+        noise_i = c2.slider("Ambience Shaping", 0.0, 1.0, preset_vals["noise"], 0.05,
+                            help="Adds organic room character and natural ambience.", disabled=not en_noise)
 
         # ── Pre-Mastering section ──
         st.markdown('<p class="section-label">Pre-Mastering</p>', unsafe_allow_html=True)
 
-        multiband_i = st.slider("Multiband Compressor", 0.0, 1.0, preset_vals["multiband"], 0.05,
-                                help="3-band compression: tightens dynamics per frequency range.")
-        tape_i = st.slider("Tape Saturation", 0.0, 1.0, preset_vals["tape"], 0.05,
-                           help="Analog tape warmth and character.")
-        glue_i = st.slider("Glue Compressor", 0.0, 1.0, preset_vals["glue"], 0.05,
-                           help="Gentle bus compression for mix cohesion.")
-        mseq_i = st.slider("Mid/Side EQ", 0.0, 1.0, preset_vals["mseq"], 0.05,
-                           help="Tighten bass center, add air on sides, presence boost.")
-        clip_i = st.slider("Soft Clipper", 0.0, 1.0, preset_vals["clip"], 0.05,
-                           help="Transparent clipping for extra loudness headroom.")
-        lufs_target = st.slider("Target LUFS", -24.0, -8.0, preset_vals["lufs"], 0.5,
-                                help="-14 = Spotify/YouTube. -11 = louder. -16 = more dynamic.")
+        c1, c2 = st.columns([0.07, 0.93])
+        en_multiband = c1.checkbox("", value=True, key="en_multiband", help="Enable/disable this stage")
+        multiband_i = c2.slider("Multiband Compressor", 0.0, 1.0, preset_vals["multiband"], 0.05,
+                                help="3-band compression: tightens dynamics per frequency range.", disabled=not en_multiband)
+
+        c1, c2 = st.columns([0.07, 0.93])
+        en_tape = c1.checkbox("", value=True, key="en_tape", help="Enable/disable this stage")
+        tape_i = c2.slider("Tape Saturation", 0.0, 1.0, preset_vals["tape"], 0.05,
+                           help="Analog tape warmth and character.", disabled=not en_tape)
+
+        c1, c2 = st.columns([0.07, 0.93])
+        en_glue = c1.checkbox("", value=True, key="en_glue", help="Enable/disable this stage")
+        glue_i = c2.slider("Glue Compressor", 0.0, 1.0, preset_vals["glue"], 0.05,
+                           help="Gentle bus compression for mix cohesion.", disabled=not en_glue)
+
+        c1, c2 = st.columns([0.07, 0.93])
+        en_mseq = c1.checkbox("", value=True, key="en_mseq", help="Enable/disable this stage")
+        mseq_i = c2.slider("Mid/Side EQ", 0.0, 1.0, preset_vals["mseq"], 0.05,
+                           help="Tighten bass center, add air on sides, presence boost.", disabled=not en_mseq)
+
+        c1, c2 = st.columns([0.07, 0.93])
+        en_clip = c1.checkbox("", value=True, key="en_clip", help="Enable/disable this stage")
+        clip_i = c2.slider("Soft Clipper", 0.0, 1.0, preset_vals["clip"], 0.05,
+                           help="Transparent clipping for extra loudness headroom.", disabled=not en_clip)
+
+        c1, c2 = st.columns([0.07, 0.93])
+        en_lufs = c1.checkbox("", value=True, key="en_lufs", help="Enable/disable this stage")
+        lufs_target = c2.slider("Target LUFS", -24.0, -8.0, preset_vals["lufs"], 0.5,
+                                help="-14 = Spotify/YouTube. -11 = louder. -16 = more dynamic.", disabled=not en_lufs)
+
+        enabled_stages = {
+            "phase": en_phase, "stereo": en_stereo, "hf": en_hf,
+            "harmonic": en_harmonic, "jitter": en_jitter, "noise": en_noise,
+            "multiband": en_multiband, "tape": en_tape, "glue": en_glue,
+            "mseq": en_mseq, "clip": en_clip, "lufs": en_lufs,
+        }
 
         process_btn = st.button("Wash Track", type="primary", use_container_width=True, disabled=not uploaded)
 
@@ -867,6 +915,7 @@ def launch_streamlit():
                     mseq_intensity=mseq_i,
                     clip_intensity=clip_i,
                     target_lufs=lufs_target,
+                    enabled_stages=enabled_stages,
                     progress_callback=on_progress,
                 )
                 progress_bar.progress(1.0, text="Done!")
@@ -958,6 +1007,10 @@ elif __name__ == "__main__":
     parser.add_argument("--lufs", type=float, default=None, help="Target LUFS (e.g. -14)")
     parser.add_argument("--preset", type=str, default=None, choices=["suno", "udio", "generic", "light"],
                         help="Apply a generator preset")
+    parser.add_argument("--disable", nargs="+", default=[],
+                        choices=["phase", "stereo", "hf", "harmonic", "jitter", "noise",
+                                 "multiband", "tape", "glue", "mseq", "clip", "lufs"],
+                        help="Disable specific processing stages")
 
     args = parser.parse_args()
 
@@ -974,6 +1027,12 @@ elif __name__ == "__main__":
             if cli_val is not None:
                 vals[key] = cli_val
 
+        cli_enabled = None
+        if args.disable:
+            all_keys = ["phase", "stereo", "hf", "harmonic", "jitter", "noise",
+                        "multiband", "tape", "glue", "mseq", "clip", "lufs"]
+            cli_enabled = {k: (k not in args.disable) for k in all_keys}
+
         wash_track(
             input_path=args.input,
             output_path=args.output,
@@ -989,6 +1048,7 @@ elif __name__ == "__main__":
             mseq_intensity=vals["mseq"],
             clip_intensity=vals["clip"],
             target_lufs=vals["lufs"],
+            enabled_stages=cli_enabled,
         )
     else:
         parser.print_help()

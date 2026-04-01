@@ -4,7 +4,7 @@ Pre-mastering and audio enhancement for AI-generated music.
 
 AI music platforms like Suno and Udio produce impressive results, but the raw output often needs polish before it's ready for release. TrackWasher bridges the gap between AI generation and professional-quality audio with a 12-stage processing chain — enhancing stereo depth, adding analog warmth, humanizing timing, and delivering broadcast-ready loudness.
 
-![Version](https://img.shields.io/badge/Version-3.1-purple)
+![Version](https://img.shields.io/badge/Version-3.2-purple)
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-green)
 
@@ -107,6 +107,9 @@ python trackwasher.py input.wav output.wav --preset suno
 # Custom enhancement + mastering
 python trackwasher.py input.wav output.wav --phase 0.8 --stereo 1.5 --hf 0.7 --multiband 0.5 --tape 0.4 --glue 0.4 --lufs -14
 
+# Disable specific stages
+python trackwasher.py input.wav output.wav --disable jitter tape glue
+
 # MP3/FLAC input (output is always WAV)
 python trackwasher.py input.mp3 output.wav --preset udio
 ```
@@ -158,7 +161,7 @@ CLI: `--preset suno`, `--preset udio`, `--preset generic`, or `--preset light`. 
 
 ## Features
 
-- **12-stage processing chain** — 6 audio enhancement + 6 pre-mastering stages
+- **12-stage processing chain** — 6 audio enhancement + 6 pre-mastering stages, each individually toggleable
 - **Platform presets** — optimized for Suno, Udio, and other AI music platforms
 - **Before/after spectrogram** — visual comparison of the processing effect
 - **Multi-format input** — WAV, FLAC, MP3, OGG (output is always lossless WAV)
