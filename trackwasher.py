@@ -295,6 +295,17 @@ def spectral_noise_shaping(audio: np.ndarray, sample_rate: int, intensity: float
     rng = np.random.default_rng(123)
     result = audio.copy()
 
+    # Signal envelope for gating — only add noise where there's audio
+    if audio.ndim > 1:
+        mono_env = np.max(np.abs(audio), axis=1)
+    else:
+        mono_env = np.abs(audio)
+    # Smooth the envelope (~50ms window)
+    env_len = max(1, int(sample_rate * 0.05))
+    kernel = np.ones(env_len) / env_len
+    gate = np.convolve(mono_env, kernel, mode='same')
+    gate = np.clip(gate / (np.max(gate) + 1e-10), 0.0, 1.0)
+
     for ch in range(n_channels):
         white = rng.standard_normal(n_samples).astype(np.float32)
 
@@ -306,9 +317,10 @@ def spectral_noise_shaping(audio: np.ndarray, sample_rate: int, intensity: float
         if pink_peak > 0:
             pink = pink / pink_peak
 
-        noise_db = -80.0 + intensity * 30.0
+        # Much lower noise floor: -96 to -78 dB (was -80 to -50)
+        noise_db = -96.0 + intensity * 18.0
         noise_level = 10.0 ** (noise_db / 20.0)
-        pink_scaled = pink * noise_level
+        pink_scaled = pink * noise_level * gate  # gated: silent in silent parts
 
         if audio.ndim > 1:
             result[:, ch] = result[:, ch] + pink_scaled
