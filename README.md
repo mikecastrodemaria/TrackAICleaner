@@ -44,10 +44,10 @@ All stages have adjustable intensity (0.0 to 1.0). Defaults are tuned for transp
 The easiest way to install and run TrackWasher. No terminal, no Python setup — just click.
 
 1. Install [Pinokio](https://pinokio.computer/) if you don't have it
-2. Click the button below or paste the repo URL in Pinokio's "Download" tab:
+2. In Pinokio, go to **Download** and paste:
 
 ```
-https://github.com/mikecastrodemaria/TrackAICleaner.git
+https://github.com/mikecastrodemaria/trackwasher.pinokio.git
 ```
 
 3. Click **Install**, then **Start** — that's it!
