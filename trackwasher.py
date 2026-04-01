@@ -1,6 +1,6 @@
 # ============================================================
 #  trackwasher.py  —  Pre-mastering & audio enhancement for AI-generated music
-#  Version 3.2
+#  Version 3.3
 #
 #  INSTALL:
 #    pip install numpy scipy soundfile streamlit pyloudnorm matplotlib pydub
@@ -106,18 +106,21 @@ def load_audio(path: str) -> tuple[np.ndarray, int]:
 # ────────────────────────────────────────────────────────────
 
 def phase_decorrelation(audio: np.ndarray, sample_rate: int, intensity: float = 0.6) -> np.ndarray:
-    """Enrich stereo depth by adding natural L/R phase variation."""
+    """Enrich stereo depth by adding natural L/R phase variation (bass-preserving)."""
     if audio.ndim < 2 or audio.shape[1] < 2:
         return audio
 
     left = audio[:, 0]
     right = audio[:, 1]
 
+    # Use allpass filter instead of high-pass to shift phase without removing bass
     freq_norm = min(0.02 + intensity * 0.03, 0.09)
-    b, a = signal.butter(2, freq_norm, btype='high')
-    phase_shifted = signal.lfilter(b, a, right)
+    b_ap, a_ap = signal.butter(2, freq_norm, btype='low')
+    # Convert lowpass to allpass: allpass = 2*lowpass - original
+    lowpassed = signal.lfilter(b_ap, a_ap, right)
+    phase_shifted = 2.0 * lowpassed - right
 
-    blend = intensity * 0.4
+    blend = intensity * 0.25  # reduced from 0.4 to be more subtle
     right_out = right * (1.0 - blend) + phase_shifted * blend
 
     result = audio.copy()
@@ -152,27 +155,29 @@ def hf_artifact_smoothing(audio: np.ndarray, sample_rate: int, intensity: float 
     cutoff_hz = 12000
     nyq = sample_rate / 2.0
 
-    if cutoff_hz >= nyq:
+    if cutoff_hz >= nyq or intensity <= 0:
         return audio
 
     result = audio.copy()
     freq_norm = cutoff_hz / nyq
 
-    b_low, a_low = signal.butter(4, freq_norm, btype='low')
-    b_high, a_high = signal.butter(4, freq_norm, btype='high')
+    # Use single lowpass and derive HF by subtraction (complementary, phase-coherent)
+    b_low, a_low = signal.butter(2, freq_norm, btype='low')
 
     n_channels = result.shape[1] if audio.ndim > 1 else 1
     for ch in range(n_channels):
         chan = result[:, ch] if audio.ndim > 1 else result
 
         low_part = signal.lfilter(b_low, a_low, chan)
-        high_part = signal.lfilter(b_high, a_high, chan)
+        high_part = chan - low_part  # complementary: no phase mismatch
 
-        kernel_size = max(3, int(sample_rate * 0.002))
+        # Gentle smoothing on HF only
+        kernel_size = max(3, int(sample_rate * 0.001))
         kernel = np.ones(kernel_size) / kernel_size
         high_smoothed = np.convolve(high_part, kernel, mode='same')
 
-        blended_high = high_part * (1.0 - intensity) + high_smoothed * intensity
+        # Blend smoothed HF back (attenuate harshness, don't boost)
+        blended_high = high_part * (1.0 - intensity * 0.5) + high_smoothed * (intensity * 0.5)
         out = low_part + blended_high
 
         if audio.ndim > 1:
@@ -185,8 +190,21 @@ def hf_artifact_smoothing(audio: np.ndarray, sample_rate: int, intensity: float 
 
 def harmonic_enrichment(audio: np.ndarray, intensity: float = 0.25) -> np.ndarray:
     """Add subtle even harmonics for analog warmth and musical richness."""
-    saturated = np.tanh(audio * (1.0 + intensity * 2.0)) / (1.0 + intensity * 0.5)
-    blend = intensity * 0.3
+    if intensity <= 0:
+        return audio
+
+    # Asymmetric soft clipping generates even harmonics (warm, tube-like)
+    # instead of tanh which generates harsh odd harmonics
+    drive = 1.0 + intensity * 1.5
+    driven = audio * drive
+    # Asymmetric waveshaper: positive side clips softer than negative
+    pos = driven - (driven ** 3) / 3.0  # cubic soft clip (even+odd but gentler)
+    neg = np.tanh(driven * 0.8)         # softer saturation on negative
+    saturated = np.where(driven >= 0, pos, neg)
+    saturated = np.clip(saturated, -1.0, 1.0)
+    saturated = saturated / drive  # compensate gain
+
+    blend = intensity * 0.2  # reduced from 0.3 — subtler
     result = audio * (1.0 - blend) + saturated * blend
 
     peak = np.max(np.abs(result))
@@ -332,7 +350,7 @@ def _compress_signal(x: np.ndarray, threshold_db: float, ratio: float,
 
 
 def multiband_compressor(audio: np.ndarray, sample_rate: int, intensity: float = 0.3) -> np.ndarray:
-    """3-band compressor: independent compression for low, mid, and high frequencies."""
+    """3-band compressor: phase-coherent band splitting with independent compression."""
     if intensity <= 0:
         return audio
 
@@ -343,13 +361,13 @@ def multiband_compressor(audio: np.ndarray, sample_rate: int, intensity: float =
     if low_cut >= high_cut:
         return audio
 
-    b_lo, a_lo = signal.butter(4, low_cut, btype='low')
-    b_mid, a_mid = signal.butter(4, [low_cut, high_cut], btype='band')
-    b_hi, a_hi = signal.butter(4, high_cut, btype='high')
+    # Phase-coherent splitting: use lowpass and derive other bands by subtraction
+    b_lo, a_lo = signal.butter(2, low_cut, btype='low')
+    b_lohi, a_lohi = signal.butter(2, high_cut, btype='low')
 
     # Compression settings per band, scaled by intensity
-    threshold_base = -20.0 + (1.0 - intensity) * 10.0  # -20 to -10 dB
-    ratio = 2.0 + intensity * 2.0  # 2:1 to 4:1
+    threshold_base = -18.0 + (1.0 - intensity) * 10.0  # -18 to -8 dB
+    ratio = 1.5 + intensity * 1.5  # 1.5:1 to 3:1 (gentler)
 
     result = audio.copy()
     n_channels = result.shape[1] if audio.ndim > 1 else 1
@@ -357,9 +375,11 @@ def multiband_compressor(audio: np.ndarray, sample_rate: int, intensity: float =
     for ch in range(n_channels):
         chan = result[:, ch] if audio.ndim > 1 else result
 
+        # Phase-coherent band splitting
         low = signal.lfilter(b_lo, a_lo, chan)
-        mid = signal.lfilter(b_mid, a_mid, chan)
-        high = signal.lfilter(b_hi, a_hi, chan)
+        below_high = signal.lfilter(b_lohi, a_lohi, chan)
+        mid = below_high - low        # mid = lowpass@4k - lowpass@250
+        high = chan - below_high       # high = original - lowpass@4k
 
         # Different attack/release per band
         low_c = _compress_signal(low, threshold_base - 2, ratio, 30.0, 200.0, sample_rate)
@@ -477,31 +497,32 @@ def midside_eq(audio: np.ndarray, sample_rate: int, intensity: float = 0.25) -> 
 
     nyq = sample_rate / 2.0
 
-    # Mid: high-pass bass tightening at ~80Hz
-    hp_freq = min(80.0 / nyq, 0.4)
-    b_hp, a_hp = signal.butter(2, hp_freq, btype='high')
+    # Mid: gentle bass tightening at ~40Hz (sub-bass only, not bass fundamentals)
+    hp_freq = min(40.0 / nyq, 0.4)
+    b_hp, a_hp = signal.butter(1, hp_freq, btype='high')
     mid_filtered = signal.lfilter(b_hp, a_hp, mid)
-    mid = mid * (1.0 - intensity * 0.3) + mid_filtered * (intensity * 0.3)
+    mid = mid * (1.0 - intensity * 0.15) + mid_filtered * (intensity * 0.15)
 
-    # Mid: slight presence boost 2-5kHz via peaking filter
-    presence_freq = min(3500.0 / nyq, 0.9)
-    if presence_freq < 0.95:
-        b_pres, a_pres = signal.butter(2, [min(2000.0 / nyq, 0.9), min(5000.0 / nyq, 0.95)], btype='band')
+    # Mid: subtle presence boost 3-5kHz (narrower, less aggressive)
+    lo_pres = min(3000.0 / nyq, 0.9)
+    hi_pres = min(5000.0 / nyq, 0.95)
+    if lo_pres < 0.9 and hi_pres < 0.95:
+        b_pres, a_pres = signal.butter(2, [lo_pres, hi_pres], btype='band')
         presence = signal.lfilter(b_pres, a_pres, mid)
-        mid = mid + presence * intensity * 0.15
+        mid = mid + presence * intensity * 0.08  # reduced from 0.15
 
-    # Side: air boost >10kHz
-    air_freq = min(10000.0 / nyq, 0.95)
+    # Side: gentle air boost >12kHz (narrower, subtler)
+    air_freq = min(12000.0 / nyq, 0.95)
     if air_freq < 0.95:
         b_air, a_air = signal.butter(2, air_freq, btype='high')
         air = signal.lfilter(b_air, a_air, side)
-        side = side + air * intensity * 0.3
+        side = side + air * intensity * 0.15  # reduced from 0.3
 
-    # Side: reduce bass below 200Hz (mono compatibility)
-    side_hp_freq = min(200.0 / nyq, 0.4)
-    b_shp, a_shp = signal.butter(2, side_hp_freq, btype='high')
+    # Side: reduce bass below 120Hz for mono compatibility (gentler)
+    side_hp_freq = min(120.0 / nyq, 0.4)
+    b_shp, a_shp = signal.butter(1, side_hp_freq, btype='high')
     side_filtered = signal.lfilter(b_shp, a_shp, side)
-    side = side * (1.0 - intensity * 0.5) + side_filtered * (intensity * 0.5)
+    side = side * (1.0 - intensity * 0.25) + side_filtered * (intensity * 0.25)
 
     result = audio.copy()
     result[:, 0] = mid + side
@@ -789,16 +810,18 @@ def launch_streamlit():
 
     with col_left:
         st.subheader("Upload")
-        uploaded = st.file_uploader(
-            "Drop an audio file here",
+        uploaded_files = st.file_uploader(
+            "Drop audio file(s) here",
             type=["wav", "flac", "mp3", "ogg"],
-            help="WAV, FLAC, MP3, or OGG (stereo or mono)",
+            help="WAV, FLAC, MP3, or OGG (stereo or mono). Select multiple files for batch processing.",
+            accept_multiple_files=True,
         )
 
-        if uploaded:
-            st.audio(uploaded, format=f"audio/{os.path.splitext(uploaded.name)[1].lstrip('.')}")
-            file_size_mb = len(uploaded.getvalue()) / (1024 * 1024)
-            st.caption(f"{uploaded.name}  —  {file_size_mb:.1f} MB")
+        if uploaded_files:
+            for uf in uploaded_files:
+                file_size_mb = len(uf.getvalue()) / (1024 * 1024)
+                st.caption(f"{uf.name}  —  {file_size_mb:.1f} MB")
+        uploaded = uploaded_files[0] if len(uploaded_files) == 1 else None
 
         st.markdown("---")
 
@@ -887,63 +910,100 @@ def launch_streamlit():
             "mseq": en_mseq, "clip": en_clip, "lufs": en_lufs,
         }
 
-        process_btn = st.button("Wash Track", type="primary", use_container_width=True, disabled=not uploaded)
+        has_files = len(uploaded_files) > 0
+        is_batch = len(uploaded_files) > 1
+        btn_label = f"Wash {len(uploaded_files)} Tracks" if is_batch else "Wash Track"
+        process_btn = st.button(btn_label, type="primary", use_container_width=True, disabled=not has_files)
 
     with col_right:
         st.subheader("Output")
 
-        if process_btn and uploaded:
-            progress_bar = st.progress(0, text="Starting...")
+        if process_btn and has_files:
+            import zipfile, io as _io
 
-            def on_progress(pct, step_name):
-                progress_bar.progress(pct, text=f"{step_name}...")
+            all_results = []
+            total_files = len(uploaded_files)
 
-            try:
-                raw_bytes = uploaded.getvalue()
-                out_bytes, sr, duration, audio_before, audio_after = wash_track_bytes(
-                    input_bytes=raw_bytes,
-                    filename=uploaded.name,
-                    phase_intensity=phase_i,
-                    stereo_width=stereo_w,
-                    hf_intensity=hf_i,
-                    harmonic_intensity=harmonic_i,
-                    jitter_intensity=jitter_i,
-                    noise_intensity=noise_i,
-                    multiband_intensity=multiband_i,
-                    tape_intensity=tape_i,
-                    glue_intensity=glue_i,
-                    mseq_intensity=mseq_i,
-                    clip_intensity=clip_i,
-                    target_lufs=lufs_target,
-                    enabled_stages=enabled_stages,
-                    progress_callback=on_progress,
-                )
-                progress_bar.progress(1.0, text="Done!")
+            for file_idx, uf in enumerate(uploaded_files):
+                if is_batch:
+                    st.markdown(f"**[{file_idx+1}/{total_files}] {uf.name}**")
 
-                st.audio(out_bytes, format="audio/wav")
-                st.caption(f"Sample rate: {sr} Hz  |  Duration: {duration:.2f}s")
+                progress_bar = st.progress(0, text=f"Processing {uf.name}...")
 
-                out_name = os.path.splitext(uploaded.name)[0] + "_washed.wav"
-                st.download_button(
-                    label="Download washed track",
-                    data=out_bytes,
-                    file_name=out_name,
-                    mime="audio/wav",
-                    use_container_width=True,
-                )
-                st.success("Track washed successfully.")
+                def on_progress(pct, step_name, _idx=file_idx):
+                    progress_bar.progress(pct, text=f"{step_name}...")
 
+                try:
+                    raw_bytes = uf.getvalue()
+                    out_bytes, sr, duration, audio_before, audio_after = wash_track_bytes(
+                        input_bytes=raw_bytes,
+                        filename=uf.name,
+                        phase_intensity=phase_i,
+                        stereo_width=stereo_w,
+                        hf_intensity=hf_i,
+                        harmonic_intensity=harmonic_i,
+                        jitter_intensity=jitter_i,
+                        noise_intensity=noise_i,
+                        multiband_intensity=multiband_i,
+                        tape_intensity=tape_i,
+                        glue_intensity=glue_i,
+                        mseq_intensity=mseq_i,
+                        clip_intensity=clip_i,
+                        target_lufs=lufs_target,
+                        enabled_stages=enabled_stages,
+                        progress_callback=on_progress,
+                    )
+                    progress_bar.progress(1.0, text="Done!")
+
+                    out_name = os.path.splitext(uf.name)[0] + "_washed.wav"
+                    all_results.append((out_name, out_bytes, sr, duration, audio_before, audio_after))
+
+                    st.audio(out_bytes, format="audio/wav")
+                    st.caption(f"Sample rate: {sr} Hz  |  Duration: {duration:.2f}s")
+                    st.download_button(
+                        label=f"Download {out_name}",
+                        data=out_bytes,
+                        file_name=out_name,
+                        mime="audio/wav",
+                        use_container_width=True,
+                        key=f"dl_{file_idx}",
+                    )
+
+                    if not is_batch:
+                        st.markdown("---")
+                        st.subheader("Spectrogram Comparison")
+                        fig = make_spectrogram_figure(audio_before, audio_after, sr)
+                        st.pyplot(fig)
+
+                except Exception as e:
+                    progress_bar.empty()
+                    st.error(f"Processing failed for {uf.name}: {e}")
+
+                if is_batch and file_idx < total_files - 1:
+                    st.markdown("---")
+
+            # Batch ZIP download
+            if is_batch and len(all_results) > 1:
                 st.markdown("---")
-                st.subheader("Spectrogram Comparison")
-                fig = make_spectrogram_figure(audio_before, audio_after, sr)
-                st.pyplot(fig)
+                zip_buf = _io.BytesIO()
+                with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for name, data, *_ in all_results:
+                        zf.writestr(name, data)
+                zip_buf.seek(0)
+                st.download_button(
+                    label=f"Download all ({len(all_results)} tracks) as ZIP",
+                    data=zip_buf.getvalue(),
+                    file_name="trackwasher_batch.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    key="dl_zip",
+                )
 
-            except Exception as e:
-                progress_bar.empty()
-                st.error(f"Processing failed: {e}")
+            if all_results:
+                st.success(f"{len(all_results)} track(s) washed successfully.")
 
         else:
-            st.info("Upload an audio file and click **Wash Track** to begin.")
+            st.info("Upload audio file(s) and click **Wash Track** to begin.")
 
         st.markdown("---")
         st.subheader("Processing Chain")
