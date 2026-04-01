@@ -5,7 +5,7 @@ Remove AI-generated fingerprints from audio tracks.
 AI music generators (Suno, Udio, etc.) leave detectable artifacts in their output — phase symmetry, spectral comb patterns, sterile stereo imaging. TrackWasher applies four audio processing stages to neutralize these signatures while preserving musical quality.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
+![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-green)
 
 ---
 
@@ -111,4 +111,9 @@ TrackAICleaner/
 
 ## License
 
-MIT
+**CC BY-NC 4.0** — Creative Commons Attribution-NonCommercial 4.0 International
+
+- Free to use, modify, and share
+- Commercial use prohibited (selling, SaaS, paid products)
+
+See [LICENSE](LICENSE) for details.
