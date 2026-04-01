@@ -4,6 +4,7 @@ Pre-mastering and audio enhancement for AI-generated music.
 
 AI music platforms like Suno and Udio produce impressive results, but the raw output often needs polish before it's ready for release. TrackWasher bridges the gap between AI generation and professional-quality audio with a 12-stage processing chain — enhancing stereo depth, adding analog warmth, humanizing timing, and delivering broadcast-ready loudness.
 
+![Version](https://img.shields.io/badge/Version-3.1-purple)
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-green)
 
@@ -55,6 +56,8 @@ https://github.com/mikecastrodemaria/trackwasher.pinokio.git
 ### Manual Install
 
 > **MP3 support** requires [ffmpeg](https://ffmpeg.org/) installed on your system (`brew install ffmpeg` / `apt install ffmpeg` / `choco install ffmpeg`).
+>
+> **Windows note:** The install scripts automatically detect and use native Windows Python, even if MSYS2/Cygwin Python is also installed.
 
 **macOS / Linux:**
 ```bash
