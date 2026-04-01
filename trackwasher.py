@@ -225,25 +225,43 @@ def micro_timing_jitter(audio: np.ndarray, sample_rate: int, intensity: float = 
         return audio
 
     rng = np.random.default_rng(42)
+    fade_len = max(16, frame_size // 4)
 
     for peak_idx in peaks:
         sample_pos = peak_idx * hop
         shift = rng.integers(-max_shift_samples, max_shift_samples + 1)
+        if shift == 0:
+            continue
 
         region_start = max(0, sample_pos - frame_size)
         region_end = min(len(result), sample_pos + frame_size)
         region_len = region_end - region_start
 
-        if region_len < abs(shift) * 2:
+        if region_len < abs(shift) * 2 + fade_len * 2:
             continue
 
-        if audio.ndim > 1:
-            for ch in range(audio.shape[1]):
+        n_ch = audio.shape[1] if audio.ndim > 1 else 1
+        for ch in range(n_ch):
+            if audio.ndim > 1:
                 region = result[region_start:region_end, ch].copy()
-                result[region_start:region_end, ch] = np.roll(region, shift)
-        else:
-            region = result[region_start:region_end].copy()
-            result[region_start:region_end] = np.roll(region, shift)
+            else:
+                region = result[region_start:region_end].copy()
+
+            # Shift via linear interpolation (no wrapping)
+            indices = np.arange(len(region), dtype=np.float64) - shift
+            indices = np.clip(indices, 0, len(region) - 1)
+            shifted = np.interp(np.arange(len(region)), indices, region)
+
+            # Crossfade at region boundaries to avoid discontinuities
+            fade_in = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)
+            fade_out = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
+            shifted[:fade_len] = region[:fade_len] * (1.0 - fade_in) + shifted[:fade_len] * fade_in
+            shifted[-fade_len:] = region[-fade_len:] * (1.0 - fade_out) + shifted[-fade_len:] * fade_out
+
+            if audio.ndim > 1:
+                result[region_start:region_end, ch] = shifted
+            else:
+                result[region_start:region_end] = shifted
 
     return result
 
@@ -541,14 +559,22 @@ def lufs_normalize(audio: np.ndarray, sample_rate: int, target_lufs: float = -14
     gain_linear = 10.0 ** (gain_db / 20.0)
     result = audio * gain_linear
 
-    true_peak_limit = 10.0 ** (-1.0 / 20.0)  # ~0.891
+    true_peak_limit = 10.0 ** (-1.0 / 20.0)  # -1 dBTP ~ 0.891
     peak = np.max(np.abs(result))
     if peak > true_peak_limit:
-        result = np.where(
-            np.abs(result) > true_peak_limit * 0.9,
-            np.sign(result) * true_peak_limit * np.tanh(np.abs(result) / true_peak_limit),
-            result,
-        )
+        # Soft-knee limiting for samples approaching the ceiling
+        knee_start = true_peak_limit * 0.85
+        above_knee = np.abs(result) > knee_start
+        if np.any(above_knee):
+            x = np.abs(result[above_knee])
+            # Smooth compression curve from knee_start to true_peak_limit
+            compressed = knee_start + (true_peak_limit - knee_start) * np.tanh(
+                (x - knee_start) / (true_peak_limit - knee_start)
+            )
+            result[above_knee] = np.sign(result[above_knee]) * compressed
+
+    # Hard safety clip — never exceed [-1.0, 1.0]
+    result = np.clip(result, -1.0, 1.0)
 
     return result
 
