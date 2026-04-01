@@ -921,21 +921,25 @@ def launch_streamlit():
         # Persist results in session_state so download clicks don't reset them
         if "washed_results" not in st.session_state:
             st.session_state.washed_results = []
+        if "washed_zip" not in st.session_state:
+            st.session_state.washed_zip = None
+            st.session_state.washed_zip_name = None
 
+        # ── Processing ──
         if process_btn and has_files:
             import zipfile, io as _io
 
             all_results = []
             total_files = len(uploaded_files)
+            progress_bar = st.progress(0, text="Starting...")
 
             for file_idx, uf in enumerate(uploaded_files):
-                if is_batch:
-                    st.markdown(f"**[{file_idx+1}/{total_files}] {uf.name}**")
+                file_base = (file_idx) / total_files
+                file_span = 1.0 / total_files
 
-                progress_bar = st.progress(0, text=f"Processing {uf.name}...")
-
-                def on_progress(pct, step_name, _idx=file_idx):
-                    progress_bar.progress(pct, text=f"{step_name}...")
+                def on_progress(pct, step_name, _base=file_base, _span=file_span, _name=uf.name):
+                    overall = _base + pct * _span
+                    progress_bar.progress(overall, text=f"{_name}: {step_name}...")
 
                 try:
                     raw_bytes = uf.getvalue()
@@ -957,7 +961,6 @@ def launch_streamlit():
                         enabled_stages=enabled_stages,
                         progress_callback=on_progress,
                     )
-                    progress_bar.progress(1.0, text="Done!")
 
                     out_name = os.path.splitext(uf.name)[0] + "_washed.wav"
                     all_results.append({
@@ -966,59 +969,64 @@ def launch_streamlit():
                     })
 
                 except Exception as e:
-                    progress_bar.empty()
-                    st.error(f"Processing failed for {uf.name}: {e}")
+                    st.error(f"Failed: {uf.name}: {e}")
 
-            # Store results in session_state so they survive reruns
+            progress_bar.progress(1.0, text=f"Done! {len(all_results)} track(s) washed.")
+
+            # Build ZIP (even for single file, keeps one download button)
+            zip_buf = _io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for r in all_results:
+                    zf.writestr(r["name"], r["data"])
+            zip_buf.seek(0)
+
+            # Store in session_state
             st.session_state.washed_results = all_results
-            if all_results:
-                st.success(f"{len(all_results)} track(s) washed successfully.")
+            if len(all_results) == 1:
+                st.session_state.washed_zip = all_results[0]["data"]
+                st.session_state.washed_zip_name = all_results[0]["name"]
+            else:
+                st.session_state.washed_zip = zip_buf.getvalue()
+                st.session_state.washed_zip_name = "trackwasher_batch.zip"
 
-        # Display results from session_state (persists across download clicks)
+        # ── Display results from session_state ──
         results = st.session_state.washed_results
         if results:
-            is_batch_result = len(results) > 1
+            # Single download button at the top
+            if len(results) == 1:
+                dl_label = f"Download {st.session_state.washed_zip_name}"
+                dl_mime = "audio/wav"
+            else:
+                dl_label = f"Download all {len(results)} tracks (ZIP)"
+                dl_mime = "application/zip"
+
+            st.download_button(
+                label=dl_label,
+                data=st.session_state.washed_zip,
+                file_name=st.session_state.washed_zip_name,
+                mime=dl_mime,
+                use_container_width=True,
+                key="dl_main",
+            )
+
+            st.markdown("---")
+
+            # Show audio players and info
             for idx, r in enumerate(results):
-                if is_batch_result:
-                    st.markdown(f"**{r['name']}**")
-
+                st.markdown(f"**{r['name']}**")
                 st.audio(r["data"], format="audio/wav")
-                st.caption(f"Sample rate: {r['sr']} Hz  |  Duration: {r['duration']:.2f}s")
-                st.download_button(
-                    label=f"Download {r['name']}",
-                    data=r["data"],
-                    file_name=r["name"],
-                    mime="audio/wav",
-                    use_container_width=True,
-                    key=f"dl_{idx}",
-                )
+                st.caption(f"{r['sr']} Hz  |  {r['duration']:.2f}s")
 
-                if not is_batch_result:
+                if len(results) == 1:
                     st.markdown("---")
                     st.subheader("Spectrogram Comparison")
                     fig = make_spectrogram_figure(r["before"], r["after"], r["sr"])
                     st.pyplot(fig)
-
-                if is_batch_result and idx < len(results) - 1:
+                elif idx < len(results) - 1:
                     st.markdown("---")
 
-            # Batch ZIP download
-            if is_batch_result:
-                import zipfile, io as _io
-                st.markdown("---")
-                zip_buf = _io.BytesIO()
-                with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for r in results:
-                        zf.writestr(r["name"], r["data"])
-                zip_buf.seek(0)
-                st.download_button(
-                    label=f"Download all ({len(results)} tracks) as ZIP",
-                    data=zip_buf.getvalue(),
-                    file_name="trackwasher_batch.zip",
-                    mime="application/zip",
-                    use_container_width=True,
-                    key="dl_zip",
-                )
+            st.success(f"{len(results)} track(s) ready.")
+
         elif not process_btn:
             st.info("Upload audio file(s) and click **Wash Track** to begin.")
 
