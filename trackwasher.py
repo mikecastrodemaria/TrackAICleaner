@@ -841,32 +841,32 @@ def launch_streamlit():
         st.markdown('<p class="section-label">Audio Enhancement</p>', unsafe_allow_html=True)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_phase = c1.checkbox("", value=True, key="en_phase", help="Enable/disable this stage")
+        en_phase = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_phase", help="Enable/disable this stage")
         phase_i = c2.slider("Stereo Depth", 0.0, 1.0, preset_vals["phase"], 0.05,
                             help="Enriches stereo depth with natural L/R variation.", disabled=not en_phase)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_stereo = c1.checkbox("", value=True, key="en_stereo", help="Enable/disable this stage")
+        en_stereo = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_stereo", help="Enable/disable this stage")
         stereo_w = c2.slider("Stereo Width", 1.0, 2.0, preset_vals["stereo"], 0.05,
                              help="Widens the stereo image. Above 1.6 may affect mono compatibility.", disabled=not en_stereo)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_hf = c1.checkbox("", value=True, key="en_hf", help="Enable/disable this stage")
+        en_hf = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_hf", help="Enable/disable this stage")
         hf_i = c2.slider("HF Refinement", 0.0, 1.0, preset_vals["hf"], 0.05,
                           help="Smooths and refines high-frequency clarity above 12kHz.", disabled=not en_hf)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_harmonic = c1.checkbox("", value=True, key="en_harmonic", help="Enable/disable this stage")
+        en_harmonic = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_harmonic", help="Enable/disable this stage")
         harmonic_i = c2.slider("Harmonic Enrichment", 0.0, 1.0, preset_vals["harmonic"], 0.05,
                                help="Adds warm analog-style harmonics for musical richness.", disabled=not en_harmonic)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_jitter = c1.checkbox("", value=True, key="en_jitter", help="Enable/disable this stage")
+        en_jitter = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_jitter", help="Enable/disable this stage")
         jitter_i = c2.slider("Timing Humanizer", 0.0, 1.0, preset_vals["jitter"], 0.05,
                              help="Adds natural micro-timing feel for a more human groove.", disabled=not en_jitter)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_noise = c1.checkbox("", value=True, key="en_noise", help="Enable/disable this stage")
+        en_noise = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_noise", help="Enable/disable this stage")
         noise_i = c2.slider("Ambience Shaping", 0.0, 1.0, preset_vals["noise"], 0.05,
                             help="Adds organic room character and natural ambience.", disabled=not en_noise)
 
@@ -874,32 +874,32 @@ def launch_streamlit():
         st.markdown('<p class="section-label">Pre-Mastering</p>', unsafe_allow_html=True)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_multiband = c1.checkbox("", value=True, key="en_multiband", help="Enable/disable this stage")
+        en_multiband = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_multiband", help="Enable/disable this stage")
         multiband_i = c2.slider("Multiband Compressor", 0.0, 1.0, preset_vals["multiband"], 0.05,
                                 help="3-band compression: tightens dynamics per frequency range.", disabled=not en_multiband)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_tape = c1.checkbox("", value=True, key="en_tape", help="Enable/disable this stage")
+        en_tape = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_tape", help="Enable/disable this stage")
         tape_i = c2.slider("Tape Saturation", 0.0, 1.0, preset_vals["tape"], 0.05,
                            help="Analog tape warmth and character.", disabled=not en_tape)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_glue = c1.checkbox("", value=True, key="en_glue", help="Enable/disable this stage")
+        en_glue = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_glue", help="Enable/disable this stage")
         glue_i = c2.slider("Glue Compressor", 0.0, 1.0, preset_vals["glue"], 0.05,
                            help="Gentle bus compression for mix cohesion.", disabled=not en_glue)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_mseq = c1.checkbox("", value=True, key="en_mseq", help="Enable/disable this stage")
+        en_mseq = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_mseq", help="Enable/disable this stage")
         mseq_i = c2.slider("Mid/Side EQ", 0.0, 1.0, preset_vals["mseq"], 0.05,
                            help="Tighten bass center, add air on sides, presence boost.", disabled=not en_mseq)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_clip = c1.checkbox("", value=True, key="en_clip", help="Enable/disable this stage")
+        en_clip = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_clip", help="Enable/disable this stage")
         clip_i = c2.slider("Soft Clipper", 0.0, 1.0, preset_vals["clip"], 0.05,
                            help="Transparent clipping for extra loudness headroom.", disabled=not en_clip)
 
         c1, c2 = st.columns([0.07, 0.93])
-        en_lufs = c1.checkbox("", value=True, key="en_lufs", help="Enable/disable this stage")
+        en_lufs = c1.checkbox("On", value=True, label_visibility="collapsed", key="en_lufs", help="Enable/disable this stage")
         lufs_target = c2.slider("Target LUFS", -24.0, -8.0, preset_vals["lufs"], 0.5,
                                 help="-14 = Spotify/YouTube. -11 = louder. -16 = more dynamic.", disabled=not en_lufs)
 
