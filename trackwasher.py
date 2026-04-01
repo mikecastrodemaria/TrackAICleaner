@@ -1,6 +1,6 @@
 # ============================================================
 #  trackwasher.py  —  Pre-mastering & audio enhancement for AI-generated music
-#  Version 3.3
+#  Version 3.4
 #
 #  INSTALL:
 #    pip install numpy scipy soundfile streamlit pyloudnorm matplotlib pydub
