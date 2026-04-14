@@ -1,4 +1,4 @@
-# TrackWasher
+# TrackAICleaner
 
 Pre-mastering and audio enhancement for AI-generated music.
 
