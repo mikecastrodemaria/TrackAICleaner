@@ -4,6 +4,9 @@ Pre-mastering and audio enhancement for AI-generated music.
 
 AI music platforms like Suno and Udio produce impressive results, but the raw output often needs polish before it's ready for release. TrackWasher bridges the gap between AI generation and professional-quality audio with a 12-stage processing chain — enhancing stereo depth, adding analog warmth, humanizing timing, and delivering broadcast-ready loudness.
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://trackaicleaner.streamlit.app)
+[![Try it online](https://img.shields.io/badge/Try%20it%20online-trackaicleaner.streamlit.app-FF4B4B?logo=streamlit&logoColor=white)](https://trackaicleaner.streamlit.app)
+
 ![Version](https://img.shields.io/badge/Version-3.5-purple)
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-green)
