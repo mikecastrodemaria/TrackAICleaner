@@ -10,3 +10,4 @@ __pycache__/
 .streamlit/*
 !.streamlit/config.toml
 user_presets.json
+venv/
