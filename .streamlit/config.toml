@@ -1,0 +1,10 @@
+[server]
+maxUploadSize = 150
+maxMessageSize = 200
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"

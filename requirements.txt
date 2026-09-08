@@ -1,7 +1,7 @@
-numpy
-scipy
-soundfile
-streamlit
-pyloudnorm
-matplotlib
-pydub
+numpy>=1.24,<3
+scipy>=1.11
+soundfile>=0.12.1
+streamlit>=1.32
+pyloudnorm>=0.1.1
+matplotlib>=3.7
+pydub>=0.25.1

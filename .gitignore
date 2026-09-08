@@ -7,5 +7,6 @@ __pycache__/
 *.wav
 *.mp3
 *.flac
-.streamlit/
+.streamlit/*
+!.streamlit/config.toml
 user_presets.json

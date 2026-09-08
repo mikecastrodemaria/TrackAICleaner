@@ -80,7 +80,10 @@ DEFAULTS = {
 
 BUILTIN_PRESET_NAMES = set(PRESETS.keys())
 
-USER_PRESETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_presets.json")
+USER_PRESETS_FILE = os.environ.get(
+    "TW_PRESETS_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_presets.json"),
+)
 
 
 def load_user_presets() -> dict:
@@ -95,11 +98,16 @@ def load_user_presets() -> dict:
     return {}
 
 
-def save_user_presets(presets: dict):
-    """Save user presets to JSON file."""
+def save_user_presets(presets: dict) -> bool:
+    """Save user presets to JSON file. Returns False if the location is not writable."""
     import json
-    with open(USER_PRESETS_FILE, "w") as f:
-        json.dump(presets, f, indent=2)
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(USER_PRESETS_FILE)), exist_ok=True)
+        with open(USER_PRESETS_FILE, "w") as f:
+            json.dump(presets, f, indent=2)
+        return True
+    except OSError:
+        return False
 
 
 # ────────────────────────────────────────────────────────────
